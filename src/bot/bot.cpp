@@ -39,6 +39,38 @@ void Bot::DoSetup() {
     FileLog::Write("[Bot] Setup tamam");
 }
 
+// SEH korumali bellek okuma — gecersiz adreste crash yerine false doner.
+static bool DumpRead(uintptr_t src, void* dst, size_t n) {
+    __try {
+        memcpy(dst, reinterpret_cast<const void*>(src), n);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        memset(dst, 0, n);
+        return false;
+    }
+}
+
+static uintptr_t derefOr0(uintptr_t addr) {
+    uintptr_t v = 0;
+    DumpRead(addr, &v, 4);
+    return v;
+}
+
+// Dosyaya bir ham bellek bolgesi yazar: nameLen, name, addr, len(u32), bytes.
+static void DumpRegion(FILE* f, const char* name, uintptr_t addr, uint32_t len) {
+    static uint8_t buf[0x1000];
+    if (len > sizeof(buf)) len = sizeof(buf);
+    uint8_t nameLen = (uint8_t)strlen(name);
+    fwrite(&nameLen, 1, 1, f);
+    fwrite(name, nameLen, 1, f);
+    uint32_t a32 = (uint32_t)addr;
+    fwrite(&a32, 4, 1, f);
+    fwrite(&len, 4, 1, f);
+    if (addr) DumpRead(addr, buf, len); else memset(buf, 0, len);
+    fwrite(buf, len, 1, f);
+    FileLog::Write("[Dump] bolge %s @ 0x%08X (%u bayt)", name, a32, len);
+}
+
 // Oyun Python fonksiyonlarinin gercek C adreslerini ve kod baytlarini
 // C:\m2t2dump.bin dosyasina yazar. VMProtect'te bile calisir (bellekteki
 // acilmis kodu okur). Bu dosyayi analiz edip CPythonCharacterManager'i buluruz.
@@ -97,6 +129,25 @@ void Bot::DumpInfo() {
             fwrite(z, codeLen, 1, f);
         }
     }
+
+    // --- Bolum B: ham bellek bolgeleri (karakter yoneticisi zinciri) ---
+    // Marker: bir bos isim (nameLen=0) bolum B'nin baslangicini isaretler
+    uint8_t zero = 0; fwrite(&zero, 1, 1, f);
+
+    uintptr_t ub = (uintptr_t)base;
+    uintptr_t mgr = 0, vtable = 0, getInst = 0;
+    DumpRead(ub + 0x2EDD980, &mgr, 4);
+    if (mgr) DumpRead(mgr + 4, &vtable, 4);
+    if (vtable) DumpRead(vtable + 8, &getInst, 4);
+    FileLog::Write("[Dump] mgr=0x%08X vtable=0x%08X GetInstancePtr=0x%08X",
+                   (uint32_t)mgr, (uint32_t)vtable, (uint32_t)getInst);
+
+    DumpRegion(f, "mgr_obj",        mgr,                 0x400);
+    DumpRegion(f, "vtable",         vtable,              0x100);
+    DumpRegion(f, "GetInstancePtr", getInst,             0x800);
+    DumpRegion(f, "GetPickedActor", ub + 0x2543310,      0x400);
+    DumpRegion(f, "player_obj",     derefOr0(ub + 0x2EDD9E4), 0x200);
+
     fclose(f);
     FileLog::Write("[Dump] C:\\m2t2dump.bin yazildi — bu dosyayi gonder");
     Console::Log("[Dump] C:\\m2t2dump.bin olusturuldu — Claude'a gonder");
