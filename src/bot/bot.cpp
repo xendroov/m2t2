@@ -516,7 +516,6 @@ void Bot::AttackArea() {
         return;
     }
 
-    std::vector<uint32_t> vids = EnumerateVIDs();
     uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
     ++m_farmPass;
 
@@ -524,6 +523,16 @@ void Bot::AttackArea() {
     static DWORD lastFull = 0;
     bool full = m_verbose && (now - lastFull >= 2000);  // ~2sn'de bir tam detay
     if (full) lastFull = now;
+
+    // Oyuncu daha dunyaya tam girmediyse entity listesi oturmamistir ->
+    // cop VID'ler (float bit-desenleri, bos isim, mesafe 0) cikar = "afallama".
+    // Oyuncu hazir olana kadar farm yapma.
+    if (myVid == 0) {
+        if (full) FileLog::Write("[FARM] oyuncu hazir degil (myVID=0) — bekleniyor");
+        return;
+    }
+
+    std::vector<uint32_t> vids = EnumerateVIDs();
 
     // 1) Adaylari topla; her eleme sebebini say (DEBUG: ne engelledi?)
     struct Cand { uint32_t vid; float d; };
@@ -535,7 +544,9 @@ void Bot::AttackArea() {
         if (vid == 0 || vid == myVid) { ++nSelf; continue; }
         snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
         float d = PyAPI::EvalFloat(buf);
-        if (d < 0.f || d > m_farmRange) { ++nFar; continue; }
+        // d<=0: gecersiz/cop VID (gercek mob hic mesafe 0 vermez; en yakin
+        // gercek mob bile ~100+ birim). Bu, "afallama" cop girdilerini eler.
+        if (d <= 0.f || d > m_farmRange) { ++nFar; continue; }
         snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
         if (PyAPI::EvalInt(buf) <= 0) { ++nInvalid; continue; }   // oyuncu/gecersiz
         snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
