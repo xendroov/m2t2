@@ -2,6 +2,7 @@
 #include "pyapi.h"
 #include "offsets.h"
 #include <algorithm>
+#include <tuple>
 
 using namespace PyAPI;
 using namespace Offsets;
@@ -20,8 +21,8 @@ bool     Entity::IsMonster()const {
 }
 
 Vec3 Entity::GetPos() const {
-    auto [x, y, z] = CallXYZ_Int(Chr::GetProjectPosition, (int)vid);
-    return {x, y, z};
+    auto xyz = CallXYZ_Int(Chr::GetProjectPosition, (int)vid);
+    return { std::get<0>(xyz), std::get<1>(xyz), std::get<2>(xyz) };
 }
 
 std::string Entity::GetName() const {

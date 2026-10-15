@@ -24,6 +24,10 @@ namespace Player {
 
 // --- module: m2netm2g ---
 namespace Net {
+    // CNetworkStream::Send / Recv — ham hook için (IDA ile bul, şimdilik 0)
+    constexpr uintptr_t SEND_FN                  = 0x00000000;
+    constexpr uintptr_t RECV_FN                  = 0x00000000;
+
     constexpr uintptr_t SendOnClickPacket        = 0x33C4910; // (vid) -> None  (saldırı/interact)
     constexpr uintptr_t SendItemUsePacket        = 0x33C7260; // (slot) -> None
     constexpr uintptr_t SendItemDropPacketNew    = 0x33C6F50; // (slot, count) -> None

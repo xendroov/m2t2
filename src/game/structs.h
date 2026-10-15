@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cmath>
 
 // Metin2 packet header enum'ları (bilinen protokolden)
 enum PacketHeader : uint8_t {
