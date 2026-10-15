@@ -44,6 +44,10 @@ static DWORD WINAPI MainThread(LPVOID) {
     FileLog::Write("PyAPI::Init basarili");
     Console::Log("[PyAPI] Hazir");
 
+    FileLog::Write("PyAPI::ImportModules cagiriliyor...");
+    PyAPI::ImportModules();
+    FileLog::Write("PyAPI::ImportModules tamam");
+
     FileLog::Write("PacketLogger::InstallHooks...");
     PacketLogger::InstallHooks();
     FileLog::Write("PacketLogger tamam");

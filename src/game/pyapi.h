@@ -10,6 +10,7 @@ using PyObject = _object;
 namespace PyAPI {
 
 bool Init();
+void ImportModules(); // Init() basarili olduktan sonra cagir
 
 // Python expression değerlendir: "player.GetStatus(0)" → int
 int         EvalInt(const char* expr);

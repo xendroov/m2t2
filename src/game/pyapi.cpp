@@ -76,30 +76,6 @@ bool Init() {
     LOAD(g_ModGetDict,  PyModule_GetDict)
     LOAD(g_ErrOccurred, PyErr_Occurred)
     LOAD(g_ErrPrint,    PyErr_Print)
-
-    // __main__'e oyun modüllerini import et (player, net, chr, chrmgr, nonplayer)
-    // Böylece EvalInt("player.GetStatus(player.HP)") gibi çağrılar çalışır.
-    AcquireGIL();
-    void* g = MainGlobals();
-    if (g && g_RunStr) {
-        const char* imports =
-            "import player\n"
-            "import net\n"
-            "import chr\n"
-            "import chrmgr\n"
-            "import nonplayer\n";
-        void* r = g_RunStr(imports, PY_FILE_INPUT, g, g);
-        if (r) {
-            g_DecRef(r);
-            g_modulesImported = true;
-            Console::Log("[PyAPI] Moduller import edildi: player, net, chr, chrmgr, nonplayer");
-        } else {
-            if (g_ErrClear) g_ErrClear();
-            Console::Log("[PyAPI] UYARI: Modul import basarisiz — oyun Python modulleri yuklu degil mi?");
-        }
-    }
-    ReleaseGIL();
-
     Console::Log("[PyAPI] Hazir — python27 @ 0x%p", (void*)g_dll);
     return true;
 }
@@ -194,6 +170,31 @@ std::tuple<float,float,float> EvalXYZ(const char* expr) {
 
 void AcquireGIL()  { if (g_GILEnsure)  g_gilState = g_GILEnsure(); }
 void ReleaseGIL()  { if (g_GILRelease) g_GILRelease(g_gilState); }
+
+// Init() basarili olduktan sonra cagrilmali — oyun modullerini __main__'e import eder.
+// Boylece EvalInt("player.GetStatus(player.HP)") gibi ifadeler calisir.
+void ImportModules() {
+    AcquireGIL();
+    void* g = MainGlobals();
+    if (g && g_RunStr) {
+        const char* imports =
+            "import player\n"
+            "import net\n"
+            "import chr\n"
+            "import chrmgr\n"
+            "import nonplayer\n";
+        void* r = g_RunStr(imports, PY_FILE_INPUT, g, g);
+        if (r) {
+            g_DecRef(r);
+            g_modulesImported = true;
+            Console::Log("[PyAPI] Moduller import edildi: player net chr chrmgr nonplayer");
+        } else {
+            if (g_ErrClear) g_ErrClear();
+            Console::Log("[PyAPI] UYARI: Modul import basarisiz");
+        }
+    }
+    ReleaseGIL();
+}
 
 PyObject* CallFn(uintptr_t addr, PyObject* args) {
     if (!addr) return nullptr;
