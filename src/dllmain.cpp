@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include "core/console.h"
+#include "game/pyapi.h"
 #include "network/packet_logger.h"
 #include "bot/bot.h"
 
@@ -12,10 +13,16 @@ static DWORD WINAPI MainThread(LPVOID) {
     Console::Open();
     Console::Log("DLL yuklendi. PID=%u", GetCurrentProcessId());
 
-    // 1) Packet hook'larını kur (önce log, sonra bot)
+    // 1) Python API'yi başlat (python27.dll bağlantısı)
+    if (!PyAPI::Init()) {
+        Console::Log("PyAPI baslatma basarisiz — bot calismayacak");
+        return 0;
+    }
+
+    // 2) Packet hook'larını kur (önce log, sonra bot)
     PacketLogger::InstallHooks();
 
-    // 2) Botu başlat
+    // 3) Botu başlat
     Bot::Instance().Start();
 
     // 3) Klavye kısayolları (Insert = durdur/başlat, Delete = eject)

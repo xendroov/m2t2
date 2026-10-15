@@ -3,13 +3,14 @@
 #include <cstdint>
 #include <string>
 #include <vector>
-#include <functional>
+#include <mutex>
 
-// CInstanceBase'i sarmalayan sınıf — pointer'dan okur
+// Oyundaki bir entity'yi VID üzerinden temsil eder.
+// Tüm veri sorguları PyAPI üzerinden canlı olarak çekilir.
 struct Entity {
-    uintptr_t base = 0;
+    uint32_t vid = 0;
 
-    bool Valid() const { return base != 0; }
+    bool Valid() const { return vid != 0; }
 
     uint32_t    GetVID()      const;
     uint32_t    GetRace()     const;
@@ -20,19 +21,16 @@ struct Entity {
     bool        IsDead()      const;
     bool        IsMonster()   const;
 
-    float DistanceTo(const Entity& other) const {
-        return GetPos().DistanceTo(other.GetPos());
-    }
-    float DistanceTo(const Vec3& pos) const {
-        return GetPos().DistanceTo(pos);
-    }
+    float DistanceTo(const Entity& other) const { return GetPos().DistanceTo(other.GetPos()); }
+    float DistanceTo(const Vec3& pos)     const { return GetPos().DistanceTo(pos); }
 };
 
-// CPythonCharacterManager wrapper — tüm entity'leri döner
+// Packet hook'larından beslenen entity kayıt sistemi
 namespace EntityManager {
+    void RegisterEntity(uint32_t vid);  // HEADER_GC_CHARACTER_ADD gelince çağrılır
+    void RemoveEntity(uint32_t vid);    // HEADER_GC_CHARACTER_DEL gelince çağrılır
+
     std::vector<Entity> GetAll();
     Entity              GetByVID(uint32_t vid);
-
-    // Yakındaki tüm canlı monster'ları mesafeye göre sıralı döner
     std::vector<Entity> GetNearbyMonsters(const Vec3& from, float maxDist);
 }

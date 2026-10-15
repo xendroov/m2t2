@@ -1,58 +1,59 @@
 #pragma once
 #include <cstdint>
 
-// !! Tüm offsetler sunucunun client binary'sine göre değişir.
-// Cheat Engine veya IDA ile kendi clientının offsetlerini bul
-// ve aşağıdaki değerleri güncelle.
+// Adresler 14.10.2016 tarihli Metin2 client dump'ından alınmıştır.
+// Bu fonksiyonlar Python C extension (PyCFunction) imzasıyla çağrılır:
+//   PyObject* fn(PyObject* self, PyObject* args)
 
 namespace Offsets {
 
-// --- Temel pointer'lar ---
-// CPythonPlayer singleton (global işaretçi adresi)
-constexpr uintptr_t PYTHON_PLAYER_PTR = 0x00000000;
-
-// CPythonCharacterManager singleton
-constexpr uintptr_t CHAR_MANAGER_PTR  = 0x00000000;
-
-// CNetworkStream singleton (send/recv için)
-constexpr uintptr_t NET_STREAM_PTR    = 0x00000000;
-
-// --- CPythonPlayer member offsetleri ---
+// --- module: playerm2g2 ---
 namespace Player {
-    constexpr uintptr_t HP          = 0x000;  // int
-    constexpr uintptr_t HP_MAX      = 0x004;  // int
-    constexpr uintptr_t MP          = 0x008;  // int
-    constexpr uintptr_t MP_MAX      = 0x00C;  // int
-    constexpr uintptr_t LEVEL       = 0x010;  // int
-    constexpr uintptr_t EXP         = 0x014;  // uint64
-    constexpr uintptr_t POS_X       = 0x020;  // float
-    constexpr uintptr_t POS_Y       = 0x024;  // float
-    constexpr uintptr_t POS_Z       = 0x028;  // float
-    constexpr uintptr_t VID         = 0x02C;  // uint32 — karakter virtual ID
+    constexpr uintptr_t GetMainCharacterPosition = 0x3454370; // () -> (x,y,z)
+    constexpr uintptr_t GetMainCharacterIndex    = 0x3454310; // () -> int
+    constexpr uintptr_t GetMainCharacterName     = 0x3454340; // () -> str
+    constexpr uintptr_t GetStatus                = 0x3456FF0; // (status_id) -> int  (HP=0,MaxHP=1,SP=2,MaxSP=3)
+    constexpr uintptr_t GetEXP                   = 0x34509E0; // () -> int
+    constexpr uintptr_t GetLevel                 = 0x34569E0; // () -> int  (GetSkillLevel, playerm2g2)
+    constexpr uintptr_t GetMoney                 = 0x3450A20; // () -> int
+    constexpr uintptr_t SetTarget                = 0x345B6C0; // (vid) -> None
+    constexpr uintptr_t GetTargetVID             = 0x3457120; // () -> int
+    constexpr uintptr_t PlayerMoveStop           = 0x3459570; // () -> None
+    constexpr uintptr_t GetRace                  = 0x34565A0; // () -> int
 }
 
-// --- CInstanceBase member offsetleri (her entity için) ---
-namespace Entity {
-    constexpr uintptr_t VID         = 0x000;  // uint32
-    constexpr uintptr_t RACE        = 0x004;  // uint32 (mob tipi)
-    constexpr uintptr_t HP          = 0x008;  // int
-    constexpr uintptr_t HP_MAX      = 0x00C;  // int
-    constexpr uintptr_t POS_X       = 0x010;  // float
-    constexpr uintptr_t POS_Y       = 0x014;  // float
-    constexpr uintptr_t NAME        = 0x018;  // char[64]
-    constexpr uintptr_t IS_DEAD     = 0x058;  // bool
-    constexpr uintptr_t IS_MONSTER  = 0x05C;  // bool
-}
-
-// --- CNetworkStream — send/recv fonksiyon adresleri ---
-// Pattern scan ile de bulunabilir (PatternScan kullan)
+// --- module: m2netm2g ---
 namespace Net {
-    constexpr uintptr_t SEND_FN     = 0x00000000;  // CNetworkStream::Send
-    constexpr uintptr_t RECV_FN     = 0x00000000;  // CNetworkStream::Recv
-    constexpr uintptr_t SEND_MOVE   = 0x00000000;  // SendMove paketi gönderen fn
-    constexpr uintptr_t SEND_ATTACK = 0x00000000;  // SendAttack
-    constexpr uintptr_t SEND_SKILL  = 0x00000000;  // SendUseSkill
-    constexpr uintptr_t SEND_PICKUP = 0x00000000;  // SendPickup (item topla)
+    constexpr uintptr_t SendOnClickPacket        = 0x33C4910; // (vid) -> None  (saldırı/interact)
+    constexpr uintptr_t SendItemUsePacket        = 0x33C7260; // (slot) -> None
+    constexpr uintptr_t SendItemDropPacketNew    = 0x33C6F50; // (slot, count) -> None
+    constexpr uintptr_t SendChatPacket           = 0x33C56A0; // (type, msg) -> None
+    constexpr uintptr_t SendCommandPacket        = 0x33C5790; // (cmd) -> None
+}
+
+// --- module: chrmgrm2g ---
+namespace ChrMgr {
+    constexpr uintptr_t GetPickedVID             = 0x32D97E0; // () -> int
+    constexpr uintptr_t IsDead                   = 0x32D99C0; // (vid) -> bool
+    constexpr uintptr_t IsPC                     = 0x32D9B10; // (vid) -> bool
+    constexpr uintptr_t GetVIDInfo               = 0x32D9830; // (vid) -> dict
+}
+
+// --- module: nonplayer ---
+namespace NonPlayer {
+    constexpr uintptr_t GetLevelByVID            = 0x3405920; // (vid) -> int
+    constexpr uintptr_t GetMonsterName           = 0x34059F0; // (vid) -> str
+    constexpr uintptr_t GetVnumByVID             = 0x3405A50; // (vid) -> int
+}
+
+// --- module: chr ---
+namespace Chr {
+    constexpr uintptr_t Pick                     = 0x32DCE60; // () -> int (vid)
+    constexpr uintptr_t GetNameByVID             = 0x32DC850; // (vid) -> str
+    constexpr uintptr_t GetProjectPosition       = 0x32DC8D0; // (vid) -> (x,y,z)
+    constexpr uintptr_t IsEnemy                  = 0x32DCB40; // (vid) -> bool
+    constexpr uintptr_t IsNPC                    = 0x32DCC50; // (vid) -> bool
+    constexpr uintptr_t IsShop                   = 0x32DCD50; // (vid) -> bool
 }
 
 } // namespace Offsets

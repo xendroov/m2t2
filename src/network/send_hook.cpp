@@ -3,6 +3,7 @@
 #include "../core/console.h"
 #include "../game/offsets.h"
 #include "../game/structs.h"
+#include "../game/entity.h"
 #include <vector>
 #include <mutex>
 #include <atomic>
@@ -49,11 +50,21 @@ bool __fastcall Hooked_Recv(void* thisptr, void* /*edx*/, void* data, int size) 
     bool ret = reinterpret_cast<tOrigRecv>(g_origRecv)(thisptr, data, size);
     if (ret && size > 0 && data) {
         ++g_recvCount;
-        Console::LogPacket("<< RECV", reinterpret_cast<const uint8_t*>(data), size);
+        const uint8_t* bytes = reinterpret_cast<const uint8_t*>(data);
+        Console::LogPacket("<< RECV", bytes, size);
+
+        // Entity listesini paket akışından güncelle
+        if (size >= sizeof(TPacketGCCharacterAdd) && bytes[0] == HEADER_GC_CHARACTER_ADD) {
+            auto* pkt = reinterpret_cast<const TPacketGCCharacterAdd*>(bytes);
+            EntityManager::RegisterEntity(pkt->dwVID);
+        } else if (size >= 5 && bytes[0] == HEADER_GC_CHARACTER_DEL) {
+            uint32_t vid = *reinterpret_cast<const uint32_t*>(bytes + 1);
+            EntityManager::RemoveEntity(vid);
+        }
 
         std::lock_guard<std::mutex> lk(g_cbMutex);
         for (auto& cb : g_recvCbs)
-            cb(reinterpret_cast<const uint8_t*>(data), size);
+            cb(bytes, size);
     }
     return ret;
 }
