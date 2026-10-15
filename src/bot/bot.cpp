@@ -6,6 +6,18 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cmath>
+#include <string>
+#include <tuple>
+#include <vector>
+
+// --- Dump v2 analizinden dogrulanan offsetler (RVA, module base'e gore) ---
+//   CPythonCharacterManager pointer : *(base + 0x2EDD980)
+//   alive instance map             : manager + 0x20  {head ptr, size}
+//   RB-tree node: +0x00 left, +0x04 parent, +0x08 right, +0x0D isnil,
+//                 +0x10 VID, +0x14 instance*
+static const uintptr_t RVA_CHARMGR = 0x2EDD980;
+static const uintptr_t MAP_OFF     = 0x20;
 
 Bot& Bot::Instance() {
     static Bot inst;
@@ -17,7 +29,7 @@ Bot& Bot::Instance() {
 
 void Bot::Start() {
     if (m_running.exchange(true)) return;
-    Console::Log("[Bot] Baslatildi — bir moba tikla, bot saldiracak (INSERT=dur)");
+    Console::Log("[Bot] Baslatildi — otomatik farm aktif (INSERT=dur)");
     FileLog::Write("[Bot] Start()");
 }
 
@@ -35,7 +47,7 @@ void Bot::DoSetup() {
     PyAPI::InjectModule("chrmgrm2g",  "chrmgr");
     PyAPI::InjectModule("chr",        "chr");
     PyAPI::InjectModule("nonplayer",  "nonplayer");
-    Console::Log("[Bot] Moduller hazir. Bir moba tikla -> otomatik vurur.");
+    Console::Log("[Bot] Moduller hazir — otomatik mob tarama aktif");
     FileLog::Write("[Bot] Setup tamam");
 }
 
@@ -153,6 +165,98 @@ void Bot::DumpInfo() {
     Console::Log("[Dump] C:\\m2t2dump.bin olusturuldu — Claude'a gonder");
 }
 
+// Alive instance map'i (RB-tree) gezip tum VID'leri toplar.
+// ANA THREAD'de cagrilmali; DumpRead SEH korumali (bozuk pointer'da crash yok).
+std::vector<uint32_t> Bot::EnumerateVIDs() {
+    std::vector<uint32_t> vids;
+    uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+    uint32_t mgr = 0;
+    DumpRead(base + RVA_CHARMGR, &mgr, 4);
+    if (!mgr) return vids;
+
+    uint32_t head = 0, size = 0;
+    DumpRead(mgr + MAP_OFF,     &head, 4);
+    DumpRead(mgr + MAP_OFF + 4, &size, 4);
+    if (!head || size == 0 || size > 8000) return vids;
+
+    uint32_t root = 0;
+    DumpRead(head + 4, &root, 4);  // head->_Parent = root
+
+    // Iteratif DFS — nil (isnil) ve head'de dur
+    static uint32_t stack[2048];
+    int sp = 0, guard = 0;
+    if (root && root != head) stack[sp++] = root;
+    while (sp > 0 && guard++ < 16000) {
+        uint32_t n = stack[--sp];
+        if (!n || n == head) continue;
+        uint8_t isnil = 1;
+        DumpRead(n + 0x0D, &isnil, 1);
+        if (isnil) continue;
+
+        uint32_t vid = 0;
+        DumpRead(n + 0x10, &vid, 4);
+        if (vid) vids.push_back(vid);
+
+        uint32_t l = 0, r = 0;
+        DumpRead(n + 0x00, &l, 4);
+        DumpRead(n + 0x08, &r, 4);
+        if (sp < 2046) {
+            if (l && l != head) stack[sp++] = l;
+            if (r && r != head) stack[sp++] = r;
+        }
+        if ((int)vids.size() > 4000) break;
+    }
+    return vids;
+}
+
+// Yakindaki en yakin uygun mob'u bulup m_targetVid'e yazar.
+void Bot::ScanTarget() {
+    std::vector<uint32_t> vids = EnumerateVIDs();
+    if (vids.empty()) { m_targetVid = 0; return; }
+
+    uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
+    auto mypos = PyAPI::EvalXYZ("player.GetMainCharacterPosition()");
+    float mx = std::get<0>(mypos), my = std::get<1>(mypos);
+
+    uint32_t best = 0; float bestD2 = m_farmRange * m_farmRange;
+    char buf[96];
+    for (uint32_t vid : vids) {
+        if (vid == myVid || vid == 0) continue;
+
+        snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
+        if (PyAPI::EvalInt(buf) <= 0) continue;        // oyuncu/gecersiz — atla
+
+        snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // olu — atla
+
+        snprintf(buf, sizeof(buf), "chr.IsNPC(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // NPC — atla
+        snprintf(buf, sizeof(buf), "chr.IsShop(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // dukkanci — atla
+
+        if (m_targetName[0]) {                          // isim filtresi
+            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", vid);
+            std::string nm = PyAPI::EvalStr(buf);
+            if (nm.find(m_targetName) == std::string::npos) continue;
+        }
+
+        snprintf(buf, sizeof(buf), "chr.GetProjectPosition(%u)", vid);
+        auto p = PyAPI::EvalXYZ(buf);
+        float dx = std::get<0>(p) - mx, dy = std::get<1>(p) - my;
+        float d2 = dx*dx + dy*dy;
+        if (d2 < bestD2) { bestD2 = d2; best = vid; }
+    }
+
+    if (best && best != m_targetVid) {
+        snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", best);
+        std::string nm = PyAPI::EvalStr(buf);
+        Console::Log("[Bot] Hedef: %s (VID %u) ~%.0f", nm.c_str(), best, sqrtf(bestD2));
+        snprintf(buf, sizeof(buf), "player.SetTarget(%u)", best);
+        PyAPI::Exec(buf);
+    }
+    m_targetVid = best;
+}
+
 // WndProc hook'tan her mesajda ANA THREAD'de cagrilir.
 void Bot::OnFrame() {
     // Dump istegi (END tusu) — bot kapali olsa bile calissin
@@ -180,9 +284,8 @@ void Bot::OnFrame() {
     if (now - m_lastStatus >= 2000) {
         m_lastStatus = now;
         int lvl  = PyAPI::EvalInt("player.GetStatus(1)");
-        int tvid = PyAPI::EvalInt("player.GetTargetVID()");
-        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d  hedef=%d",
-                     lvl, hp, maxhp, sp, maxsp, tvid);
+        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d  hedef=%u",
+                     lvl, hp, maxhp, sp, maxsp, m_targetVid);
     }
 
     // --- Otomatik iksir (tus gonderimi — quickslot'a iksir koymalisin) ---
@@ -201,14 +304,33 @@ void Bot::OnFrame() {
     // HP kritikse saldirma (olmemek icin)
     if (maxhp > 0 && (hp * 100 / maxhp) < 10) return;
 
-    // Secili hedefe saldir
-    int vid = PyAPI::EvalInt("player.GetTargetVID()");
-    if (vid <= 0) return;
-
     char buf[96];
-    snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
-    if (PyAPI::EvalBool(buf)) return;   // olmusse birak
 
-    snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%d)", vid);
-    PyAPI::Exec(buf);                   // saldir
+    if (m_autoFarm) {
+        // Periyodik tarama: en yakin mob'u hedefle
+        if (now - m_lastScan >= 600) {
+            m_lastScan = now;
+            // mevcut hedef oldu/kayboldu mu?
+            if (m_targetVid) {
+                snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", m_targetVid);
+                if (PyAPI::EvalBool(buf)) m_targetVid = 0;
+            }
+            ScanTarget();
+        }
+        // Hedefe saldir
+        if (m_targetVid) {
+            snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", m_targetVid);
+            if (PyAPI::EvalBool(buf)) { m_targetVid = 0; return; }
+            snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%u)", m_targetVid);
+            PyAPI::Exec(buf);
+        }
+    } else {
+        // Manuel mod: oyuncunun secili hedefine vur
+        int vid = PyAPI::EvalInt("player.GetTargetVID()");
+        if (vid <= 0) return;
+        snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
+        if (PyAPI::EvalBool(buf)) return;
+        snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%d)", vid);
+        PyAPI::Exec(buf);
+    }
 }
