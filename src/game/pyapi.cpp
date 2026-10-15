@@ -10,6 +10,9 @@ namespace PyAPI {
 // PyGILState_STATE = int (python27 ABI'sinde sabit)
 using PyGILState_STATE = int;
 
+// g_modulesImported: Init() içinde player/net/chr/chrmgr/nonplayer'ı __main__'e import eder
+static bool g_modulesImported = false;
+
 // Py_eval_input / Py_file_input compile constants (Python 2.7 sabit değerleri)
 static constexpr int PY_EVAL_INPUT   = 258;
 static constexpr int PY_FILE_INPUT   = 257;
@@ -73,6 +76,30 @@ bool Init() {
     LOAD(g_ModGetDict,  PyModule_GetDict)
     LOAD(g_ErrOccurred, PyErr_Occurred)
     LOAD(g_ErrPrint,    PyErr_Print)
+
+    // __main__'e oyun modüllerini import et (player, net, chr, chrmgr, nonplayer)
+    // Böylece EvalInt("player.GetStatus(player.HP)") gibi çağrılar çalışır.
+    AcquireGIL();
+    void* g = MainGlobals();
+    if (g && g_RunStr) {
+        const char* imports =
+            "import player\n"
+            "import net\n"
+            "import chr\n"
+            "import chrmgr\n"
+            "import nonplayer\n";
+        void* r = g_RunStr(imports, PY_FILE_INPUT, g, g);
+        if (r) {
+            g_DecRef(r);
+            g_modulesImported = true;
+            Console::Log("[PyAPI] Moduller import edildi: player, net, chr, chrmgr, nonplayer");
+        } else {
+            if (g_ErrClear) g_ErrClear();
+            Console::Log("[PyAPI] UYARI: Modul import basarisiz — oyun Python modulleri yuklu degil mi?");
+        }
+    }
+    ReleaseGIL();
+
     Console::Log("[PyAPI] Hazir — python27 @ 0x%p", (void*)g_dll);
     return true;
 }
@@ -91,8 +118,8 @@ static void* EvalExpr(const char* expr) {
     if (!g || !g_RunStr) return nullptr;
     void* result = g_RunStr(expr, PY_EVAL_INPUT, g, g);
     if (!result && g_ErrOccurred && g_ErrOccurred()) {
-        Console::Log("[PyAPI] EvalExpr hata: %s", expr);
-        if (g_ErrPrint) g_ErrPrint();
+        // PyErr_Print() oyunun sys.stderr'ına yazar — başka thread'den crash verebilir.
+        // Sadece temizle, sessizce geç.
         if (g_ErrClear) g_ErrClear();
     }
     return result;
@@ -141,8 +168,6 @@ void Exec(const char* code) {
     if (g && g_RunStr) {
         void* r = g_RunStr(code, PY_FILE_INPUT, g, g);
         if (!r && g_ErrOccurred && g_ErrOccurred()) {
-            Console::Log("[PyAPI] Exec hata: %s", code);
-            if (g_ErrPrint) g_ErrPrint();
             if (g_ErrClear) g_ErrClear();
         }
         if (r) g_DecRef(r);
