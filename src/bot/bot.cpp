@@ -1,79 +1,79 @@
 #include "bot.h"
-#include "states/farm_state.h"
-#include "states/loot_state.h"
-#include "../game/player.h"
+#include "../game/pyapi.h"
 #include "../core/console.h"
 #include "../core/filelog.h"
-#include <Windows.h>
 
 Bot& Bot::Instance() {
     static Bot inst;
     return inst;
 }
 
-static DWORD WINAPI BotThread(LPVOID param) {
-    reinterpret_cast<Bot*>(param)->Loop(); // çağrısını dışarı açmak için friend veya proxy
-    return 0;
-}
+// Python thread olarak calistirilan bot kodu.
+// C++ thread'den degil, Python'un kendi threading modulu uzerinden calisir.
+// Boylece game C extension'larini (player.GetStatus vb.) guvenli cagirabiliriz.
+static const char* BOT_PYTHON_CODE = R"(
+import threading as _t
+import time as _time
 
-// Loop'u public yapıyoruz (dllmain içinden çağrılacak) — alternatif: friend
-void Bot::Loop() {
-    Console::Log("[Bot] Thread baslatildi");
-    FileLog::Write("[Bot] Thread baslatildi");
+try:
+    import player as _player
+    import net as _net
+    import chr as _chr
+    import chrmgr as _chrmgr
+    _modules_ok = True
+except ImportError:
+    _modules_ok = False
 
-    while (m_running.load()) {
-        __try {
-            if (m_state) {
-                float hp = Player::GetHPPercent();
-                if (hp > 0.f && hp < 10.f) {
-                    Console::Log("[Bot] HP dusuk (%.0f%%) — bekleniyor...", hp);
-                    Sleep(2000);
-                    continue;
-                }
-                m_state->Update();
-            }
-        } __except(EXCEPTION_EXECUTE_HANDLER) {
-            DWORD code = GetExceptionCode();
-            Console::Log("[Bot] EXCEPTION 0x%08X — state durduruldu", code);
-            FileLog::Write("[Bot] EXCEPTION 0x%08X icinde %s",
-                code, m_state ? m_state->Name() : "?");
-            m_state.reset();   // crash olan state'i sıfırla
-            Sleep(1000);
-        }
-        Sleep(TICK_MS);
-    }
+_m2bot_running = True
+_m2bot_tick    = 0.10   # saniye
 
-    Console::Log("[Bot] Thread durdu");
-    FileLog::Write("[Bot] Thread durdu");
-}
+def _m2bot_loop():
+    global _m2bot_running
+    _log_interval = 5.0
+    _last_log = 0.0
+    while _m2bot_running:
+        try:
+            if _modules_ok:
+                hp     = _player.GetStatus(_player.HP)
+                maxhp  = _player.GetStatus(_player.MAX_HP)
+                sp     = _player.GetStatus(_player.SP)
+                maxsp  = _player.GetStatus(_player.MAX_SP)
+                if maxhp > 0:
+                    now = _time.time()
+                    if now - _last_log >= _log_interval:
+                        _last_log = now
+                        # HP/SP logla (console icin Python'dan dogrudan yazamazsin,
+                        # ama degerleri okuyabiliyoruz — ileride UI'ya tasinabilir)
+                        pass
+                    # HP kritikse bekle
+                    if float(hp) / maxhp < 0.10:
+                        _time.sleep(2.0)
+                        continue
+        except Exception:
+            pass
+        _time.sleep(_m2bot_tick)
+
+_m2bot_thread = _t.Thread(target=_m2bot_loop)
+_m2bot_thread.daemon = True
+_m2bot_thread.start()
+)";
+
+static const char* BOT_STOP_CODE =
+    "_m2bot_running = False\n";
 
 void Bot::Start() {
-    if (m_running.exchange(true)) return; // Zaten çalışıyor
+    if (m_running.exchange(true)) return;
 
-    // Varsayılan state: farm + loot
-    auto farm = std::make_unique<FarmState>(1500.f, /*skillVnum=*/0);
-    SetState(std::move(farm));
-
-    // PacketLogger'a loot state callback'ini kaydet (iç bağlantı için gerek duyulursa)
-    // LootState bağımsız dinleyici olarak PacketLogger::OnRecv'e kendi OnEnter'ında kayıt olur.
-
-    m_thread = CreateThread(nullptr, 0, BotThread, this, 0, nullptr);
-    Console::Log("[Bot] Baslatildi");
+    FileLog::Write("[Bot] Python thread baslatiliyor...");
+    PyAPI::Exec(BOT_PYTHON_CODE);
+    Console::Log("[Bot] Python thread baslatildi");
+    FileLog::Write("[Bot] Python thread baslatildi");
 }
 
 void Bot::Stop() {
-    m_running.store(false);
-    if (m_thread) {
-        WaitForSingleObject(m_thread, 3000);
-        CloseHandle(m_thread);
-        m_thread = nullptr;
-    }
-    if (m_state) { m_state->OnExit(); m_state.reset(); }
-    Console::Log("[Bot] Durduruldu");
-}
+    if (!m_running.exchange(false)) return;
 
-void Bot::SetState(std::unique_ptr<IState> state) {
-    if (m_state) m_state->OnExit();
-    m_state = std::move(state);
-    if (m_state) m_state->OnEnter();
+    PyAPI::Exec(BOT_STOP_CODE);
+    Console::Log("[Bot] Durduruldu");
+    FileLog::Write("[Bot] Durduruldu");
 }
