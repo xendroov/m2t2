@@ -2,6 +2,7 @@
 #include "../game/pyapi.h"
 #include "../core/console.h"
 #include "../core/filelog.h"
+#include "../core/wndhook.h"
 #include <cstdio>
 
 Bot& Bot::Instance() {
@@ -51,14 +52,29 @@ void Bot::OnFrame() {
 
     int hp    = PyAPI::EvalInt("player.GetStatus(5)");   // HP
     int maxhp = PyAPI::EvalInt("player.GetStatus(6)");   // MAX_HP
+    int sp    = PyAPI::EvalInt("player.GetStatus(7)");   // SP
+    int maxsp = PyAPI::EvalInt("player.GetStatus(8)");   // MAX_SP
 
     // 2 saniyede bir canli durum yaz (botun calistigini gorursun)
     if (now - m_lastStatus >= 2000) {
         m_lastStatus = now;
-        int sp  = PyAPI::EvalInt("player.GetStatus(7)");
-        int lvl = PyAPI::EvalInt("player.GetStatus(1)");
+        int lvl  = PyAPI::EvalInt("player.GetStatus(1)");
         int tvid = PyAPI::EvalInt("player.GetTargetVID()");
-        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d  hedef=%d", lvl, hp, maxhp, sp, tvid);
+        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d  hedef=%d",
+                     lvl, hp, maxhp, sp, maxsp, tvid);
+    }
+
+    // --- Otomatik iksir (tus gonderimi — quickslot'a iksir koymalisin) ---
+    if (m_autoPotion) {
+        if (maxhp > 0 && (hp * 100 / maxhp) < m_hpPotPct && (now - m_lastHpPot) > 800) {
+            WndHook::SendKey(m_hpPotKey);
+            m_lastHpPot = now;
+            FileLog::Write("[Bot] HP %%%d - iksir (F%d)", hp * 100 / maxhp, m_hpPotKey - 0x6F);
+        }
+        if (maxsp > 0 && (sp * 100 / maxsp) < m_spPotPct && (now - m_lastSpPot) > 800) {
+            WndHook::SendKey(m_spPotKey);
+            m_lastSpPot = now;
+        }
     }
 
     // HP kritikse saldirma (olmemek icin)

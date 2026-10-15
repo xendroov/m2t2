@@ -124,4 +124,13 @@ void Remove() {
 
 bool IsInstalled() { return g_installed; }
 
+void SendKey(int vk) {
+    if (!g_wnd) return;
+    UINT sc = MapVirtualKeyA(vk, 0 /*MAPVK_VK_TO_VSC*/);
+    LPARAM down = 1 | (static_cast<LPARAM>(sc) << 16);
+    LPARAM up   = 1 | (static_cast<LPARAM>(sc) << 16) | (1L << 30) | (1L << 31);
+    PostMessageA(g_wnd, WM_KEYDOWN, vk, down);
+    PostMessageA(g_wnd, WM_KEYUP,   vk, up);
+}
+
 } // namespace WndHook

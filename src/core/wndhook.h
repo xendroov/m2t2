@@ -7,4 +7,7 @@ namespace WndHook {
     bool Install();
     void Remove();
     bool IsInstalled();
+
+    // Oyun penceresine tus gonder (WM_KEYDOWN+WM_KEYUP). Otomatik iksir vb. icin.
+    void SendKey(int vk);
 }
