@@ -16,8 +16,13 @@
 //   alive instance map             : manager + 0x20  {head ptr, size}
 //   RB-tree node: +0x00 left, +0x04 parent, +0x08 right, +0x0D isnil,
 //                 +0x10 VID, +0x14 instance*
-static const uintptr_t RVA_CHARMGR = 0x2EDD980;
-static const uintptr_t MAP_OFF     = 0x20;
+static const uintptr_t RVA_CHARMGR   = 0x2EDD980;
+static const uintptr_t MAP_OFF       = 0x20;
+// net_code dump analizinden: CPythonNetworkStream singleton + SendAttackPacket
+//   netstream   = *(base + 0x2EDD794)
+//   SendAttackPacket(this, BYTE bType, DWORD vid) = base + 0x2663FC0  (header 0x12)
+static const uintptr_t RVA_NETSTREAM = 0x2EDD794;
+static const uintptr_t RVA_SENDATTACK= 0x2663FC0;
 
 Bot& Bot::Instance() {
     static Bot inst;
@@ -66,6 +71,22 @@ static uintptr_t derefOr0(uintptr_t addr) {
     uintptr_t v = 0;
     DumpRead(addr, &v, 4);
     return v;
+}
+
+// Gercek saldiri paketi: CPythonNetworkStream::SendAttackPacket(bType, vid).
+// Ana thread'de cagrilir. thiscall -> __fastcall(this, edx-dummy, bType, vid).
+typedef char(__fastcall* tSendAttack)(void* thisPtr, int edxDummy,
+                                      unsigned char bType, unsigned int vid);
+static void GameAttack(uint32_t vid) {
+    if (!vid) return;
+    uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+    uint32_t netstream = 0;
+    DumpRead(base + RVA_NETSTREAM, &netstream, 4);
+    if (!netstream) return;
+    auto fn = reinterpret_cast<tSendAttack>(base + RVA_SENDATTACK);
+    __try {
+        fn(reinterpret_cast<void*>(netstream), 0, 0, vid);  // bType=0 (normal)
+    } __except (EXCEPTION_EXECUTE_HANDLER) {}
 }
 
 // Dosyaya bir ham bellek bolgesi yazar: nameLen, name, addr, len(u32), bytes.
@@ -239,13 +260,8 @@ void Bot::ScanTarget() {
     if (vids.empty()) { m_targetVid = 0; return; }
 
     uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
-    // Konumlari mob'larla AYNI fonksiyondan al (tutarli koordinat sistemi)
-    char mbuf[64];
-    snprintf(mbuf, sizeof(mbuf), "chr.GetProjectPosition(%u)", myVid);
-    auto mypos = PyAPI::EvalXYZ(mbuf);
-    float mx = std::get<0>(mypos), my = std::get<1>(mypos);
 
-    uint32_t best = 0; float bestD2 = 1e30f;   // menzilsiz: en yakini sec
+    uint32_t best = 0; float bestDist = 1e30f;   // en yakini sec
     int cand = 0, sample = 0;
     char buf[96];
     for (uint32_t vid : vids) {
@@ -269,26 +285,18 @@ void Bot::ScanTarget() {
             if (nm.find(m_targetName) == std::string::npos) continue;
         }
 
-        snprintf(buf, sizeof(buf), "chr.GetProjectPosition(%u)", vid);
-        auto p = PyAPI::EvalXYZ(buf);
-        float dx = std::get<0>(p) - mx, dy = std::get<1>(p) - my;
-        float d2 = dx*dx + dy*dy;
+        // Mesafe: player.GetCharacterDistance(vid) — koordinat derdi yok
+        snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
+        float dist = PyAPI::EvalFloat(buf);
         if (dbg && sample < 3) {
-            FileLog::Write("[Scan] ornek VID=%u pos=(%.0f,%.0f) mesafe=%.0f",
-                           vid, std::get<0>(p), std::get<1>(p), sqrtf(d2));
+            FileLog::Write("[Scan] ornek VID=%u mesafe=%.1f", vid, dist);
             ++sample;
         }
-        if (d2 < bestD2) { bestD2 = d2; best = vid; }
+        if (dist >= 0.f && dist < bestDist) { bestDist = dist; best = vid; }
     }
 
-    if (dbg) FileLog::Write("[Scan] mob aday=%d  secilen VID=%u  mesafe=%.0f  myVID=%u  mypos=(%.0f,%.0f)",
-                            cand, best, best ? sqrtf(bestD2) : 0.f, myVid, mx, my);
-
-    // Menzil disindaysa yine de hedefle ama uzaksa atla (cok uzak = baska harita parcasi)
-    if (best && bestD2 > (m_farmRange * m_farmRange)) {
-        if (dbg) FileLog::Write("[Scan] en yakin %.0f > menzil %.0f — yine de hedefleniyor",
-                                sqrtf(bestD2), m_farmRange);
-    }
+    if (dbg) FileLog::Write("[Scan] mob aday=%d  secilen VID=%u  mesafe=%.1f  myVID=%u",
+                            cand, best, best ? bestDist : -1.f, myVid);
 
     if (best && best != m_targetVid) {
         snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", best);
@@ -361,12 +369,11 @@ void Bot::OnFrame() {
             }
             ScanTarget();
         }
-        // Hedefe saldir
+        // Hedefe saldir — gercek SendAttackPacket (ana thread, guvenli)
         if (m_targetVid) {
             snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", m_targetVid);
             if (PyAPI::EvalBool(buf)) { m_targetVid = 0; return; }
-            snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%u)", m_targetVid);
-            PyAPI::Exec(buf);
+            GameAttack(m_targetVid);
         }
     } else {
         // Manuel mod: oyuncunun secili hedefine vur
@@ -374,7 +381,6 @@ void Bot::OnFrame() {
         if (vid <= 0) return;
         snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
         if (PyAPI::EvalBool(buf)) return;
-        snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%d)", vid);
-        PyAPI::Exec(buf);
+        GameAttack((uint32_t)vid);
     }
 }
