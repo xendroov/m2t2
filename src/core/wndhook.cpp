@@ -4,6 +4,7 @@
 #include "../bot/bot.h"
 
 #include <Windows.h>
+#include <cstring>
 
 namespace WndHook {
 
@@ -40,27 +41,43 @@ static LRESULT CALLBACK HookedWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return CallWindowProc(g_orig, hwnd, msg, wp, lp);
 }
 
-// Bu process'e ait ilk gorunur, basligi olan ust-duzey pencereyi bul.
+// Process'in TUM ust-duzey pencerelerini tarar, konsolu atlar,
+// EN BUYUK pencereyi (oyun render penceresi) secer.
+struct Candidate { HWND best; long bestArea; };
+
 static BOOL CALLBACK EnumProc(HWND hwnd, LPARAM lParam) {
+    auto* c = reinterpret_cast<Candidate*>(lParam);
+
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
     if (pid != GetCurrentProcessId()) return TRUE;
     if (!IsWindowVisible(hwnd))       return TRUE;
     if (GetWindow(hwnd, GW_OWNER) != nullptr) return TRUE; // sadece ust-duzey
+    if (hwnd == GetConsoleWindow())   return TRUE;         // kendi konsolumuz degil
+
+    char cls[64] = {0};
+    GetClassNameA(hwnd, cls, sizeof(cls));
+    if (strcmp(cls, "ConsoleWindowClass") == 0) return TRUE; // konsol sinifi degil
+
+    RECT r = {0};
+    GetWindowRect(hwnd, &r);
+    long w = r.right - r.left, h = r.bottom - r.top;
+    long area = w * h;
 
     char title[256] = {0};
     GetWindowTextA(hwnd, title, sizeof(title));
-    if (title[0] == '\0') return TRUE; // basliksiz pencereleri atla
+    FileLog::Write("[Wnd] aday: '%s' cls=%s %ldx%ld", title, cls, w, h);
 
-    *reinterpret_cast<HWND*>(lParam) = hwnd;
-    return FALSE; // bulundu, dur
+    if (area > c->bestArea) { c->bestArea = area; c->best = hwnd; }
+    return TRUE; // devam et — en buyugu sec
 }
 
 bool Install() {
     if (g_installed) return true;
 
-    HWND hwnd = nullptr;
-    EnumWindows(EnumProc, reinterpret_cast<LPARAM>(&hwnd));
+    Candidate cand = { nullptr, 0 };
+    EnumWindows(EnumProc, reinterpret_cast<LPARAM>(&cand));
+    HWND hwnd = cand.best;
     if (!hwnd) {
         FileLog::Write("[Wnd] oyun penceresi bulunamadi");
         Console::Log("[Wnd] HATA: pencere bulunamadi");
@@ -70,7 +87,7 @@ bool Install() {
 
     char title[256] = {0};
     GetWindowTextA(hwnd, title, sizeof(title));
-    FileLog::Write("[Wnd] pencere: '%s' hwnd=0x%p", title, (void*)hwnd);
+    FileLog::Write("[Wnd] SECILEN pencere: '%s' hwnd=0x%p", title, (void*)hwnd);
     Console::Log("[Wnd] pencere: '%s'", title);
 
     g_unicode = IsWindowUnicode(hwnd) != FALSE;
