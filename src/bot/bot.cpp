@@ -225,11 +225,14 @@ void Bot::ScanTarget() {
     if (vids.empty()) { m_targetVid = 0; return; }
 
     uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
-    auto mypos = PyAPI::EvalXYZ("player.GetMainCharacterPosition()");
+    // Konumlari mob'larla AYNI fonksiyondan al (tutarli koordinat sistemi)
+    char mbuf[64];
+    snprintf(mbuf, sizeof(mbuf), "chr.GetProjectPosition(%u)", myVid);
+    auto mypos = PyAPI::EvalXYZ(mbuf);
     float mx = std::get<0>(mypos), my = std::get<1>(mypos);
 
-    uint32_t best = 0; float bestD2 = m_farmRange * m_farmRange;
-    int cand = 0;
+    uint32_t best = 0; float bestD2 = 1e30f;   // menzilsiz: en yakini sec
+    int cand = 0, sample = 0;
     char buf[96];
     for (uint32_t vid : vids) {
         if (vid == myVid || vid == 0) continue;
@@ -256,11 +259,22 @@ void Bot::ScanTarget() {
         auto p = PyAPI::EvalXYZ(buf);
         float dx = std::get<0>(p) - mx, dy = std::get<1>(p) - my;
         float d2 = dx*dx + dy*dy;
+        if (dbg && sample < 3) {
+            FileLog::Write("[Scan] ornek VID=%u pos=(%.0f,%.0f) mesafe=%.0f",
+                           vid, std::get<0>(p), std::get<1>(p), sqrtf(d2));
+            ++sample;
+        }
         if (d2 < bestD2) { bestD2 = d2; best = vid; }
     }
 
-    if (dbg) FileLog::Write("[Scan] mob aday=%d  secilen VID=%u  myVID=%u  mypos=(%.0f,%.0f)",
-                            cand, best, myVid, mx, my);
+    if (dbg) FileLog::Write("[Scan] mob aday=%d  secilen VID=%u  mesafe=%.0f  myVID=%u  mypos=(%.0f,%.0f)",
+                            cand, best, best ? sqrtf(bestD2) : 0.f, myVid, mx, my);
+
+    // Menzil disindaysa yine de hedefle ama uzaksa atla (cok uzak = baska harita parcasi)
+    if (best && bestD2 > (m_farmRange * m_farmRange)) {
+        if (dbg) FileLog::Write("[Scan] en yakin %.0f > menzil %.0f — yine de hedefleniyor",
+                                sqrtf(bestD2), m_farmRange);
+    }
 
     if (best && best != m_targetVid) {
         snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", best);
