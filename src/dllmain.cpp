@@ -48,9 +48,8 @@ static DWORD WINAPI MainThread(LPVOID) {
     PacketLogger::InstallHooks();
     FileLog::Write("PacketLogger tamam");
 
-    FileLog::Write("Bot::Start...");
-    Bot::Instance().Start();
-    FileLog::Write("Bot baslatildi");
+    // Bot otomatik başlatılmıyor — INSERT'e basınca başlar
+    FileLog::Write("Bot hazir (INSERT ile baslatilacak)");
 
 keyboard_loop:
     Console::Log("INSERT=bot ac/kapat  DELETE=cikis");

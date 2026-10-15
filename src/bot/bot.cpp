@@ -3,6 +3,7 @@
 #include "states/loot_state.h"
 #include "../game/player.h"
 #include "../core/console.h"
+#include "../core/filelog.h"
 #include <Windows.h>
 
 Bot& Bot::Instance() {
@@ -18,22 +19,32 @@ static DWORD WINAPI BotThread(LPVOID param) {
 // Loop'u public yapıyoruz (dllmain içinden çağrılacak) — alternatif: friend
 void Bot::Loop() {
     Console::Log("[Bot] Thread baslatildi");
+    FileLog::Write("[Bot] Thread baslatildi");
 
     while (m_running.load()) {
-        if (m_state) {
-            // HP %10'un altındaysa farm duraklat
-            float hp = Player::GetHPPercent();
-            if (hp > 0.f && hp < 10.f) {
-                Console::Log("[Bot] HP dusuk (%.0f%%) — bekleniyor...", hp);
-                Sleep(2000);
-                continue;
+        __try {
+            if (m_state) {
+                float hp = Player::GetHPPercent();
+                if (hp > 0.f && hp < 10.f) {
+                    Console::Log("[Bot] HP dusuk (%.0f%%) — bekleniyor...", hp);
+                    Sleep(2000);
+                    continue;
+                }
+                m_state->Update();
             }
-            m_state->Update();
+        } __except(EXCEPTION_EXECUTE_HANDLER) {
+            DWORD code = GetExceptionCode();
+            Console::Log("[Bot] EXCEPTION 0x%08X — state durduruldu", code);
+            FileLog::Write("[Bot] EXCEPTION 0x%08X icinde %s",
+                code, m_state ? m_state->Name() : "?");
+            m_state.reset();   // crash olan state'i sıfırla
+            Sleep(1000);
         }
         Sleep(TICK_MS);
     }
 
     Console::Log("[Bot] Thread durdu");
+    FileLog::Write("[Bot] Thread durdu");
 }
 
 void Bot::Start() {
