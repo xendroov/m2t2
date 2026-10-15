@@ -3,51 +3,77 @@
 #include "../core/console.h"
 #include "../core/filelog.h"
 #include <cstdio>
+#include <cctype>
+#include <string>
+#include <vector>
 
 Bot& Bot::Instance() {
     static Bot inst;
     return inst;
 }
 
-// -----------------------------------------------------------------------
-// Sabit adres YOK. Fonksiyonlar isimle cagriliyor (player.GetStatus gibi).
-// Yorumlayici dogru adresi kendi bulur — yanlis adrese atlayip crash OLMAZ.
-// import YOK, threading YOK — sadece zaten yuklu modullere eriyoruz.
-// -----------------------------------------------------------------------
+// Bir isim ilginc mi? (oyun modullerini sys.modules yiginindan ayiklamak icin)
+static bool Interesting(const std::string& n) {
+    const char* keys[] = {
+        "player", "net", "chr", "char", "item", "shop", "quest",
+        "nonplayer", "background", "m2g", "m2net", "guild", "pack", nullptr
+    };
+    std::string low;
+    for (char c : n) low += (char)tolower((unsigned char)c);
+    for (int i = 0; keys[i]; ++i)
+        if (low.find(keys[i]) != std::string::npos) return true;
+    return false;
+}
 
 void Bot::Start() {
     if (m_running.exchange(true)) return;
 
-    // --- TANI: hangi moduller/fonksiyonlar erisilebilir? ---
-    // Her eval crash-guvenli: modul yoksa "" veya 0 doner, cokmez.
-    FileLog::Write("[Bot] === TANI BASLADI ===");
+    FileLog::Write("[Bot] === sys.modules DOKUMU ===");
 
-    std::string sPlayer = PyAPI::EvalStr("str(player)");
-    FileLog::Write("[Bot] player     = %s", sPlayer.empty() ? "(YOK)" : sPlayer.c_str());
+    auto names = PyAPI::ModuleNames();
+    FileLog::Write("[Bot] Toplam modul sayisi: %d", (int)names.size());
 
-    std::string sChr = PyAPI::EvalStr("str(chr)");
-    FileLog::Write("[Bot] chr        = %s", sChr.empty() ? "(YOK)" : sChr.c_str());
+    // Ilginc modulleri (player/net/chr/... iceren) logla
+    std::string line;
+    int shown = 0;
+    for (auto& n : names) {
+        if (!Interesting(n)) continue;
+        line += n;
+        line += "  ";
+        ++shown;
+        if (line.size() > 180) {
+            FileLog::Write("[Bot] ILGINC: %s", line.c_str());
+            line.clear();
+        }
+    }
+    if (!line.empty()) FileLog::Write("[Bot] ILGINC: %s", line.c_str());
+    FileLog::Write("[Bot] Ilginc modul: %d adet", shown);
 
-    std::string sChrmgr = PyAPI::EvalStr("str(chrmgr)");
-    FileLog::Write("[Bot] chrmgr     = %s", sChrmgr.empty() ? "(YOK)" : sChrmgr.c_str());
+    // Bilinen isimleri __main__'e enjekte etmeyi dene (hem sade hem m2g versiyonlari)
+    struct Pair { const char* sysName; const char* as; };
+    Pair tryList[] = {
+        {"player", "player"}, {"playerm2g2", "player"}, {"playerm2g", "player"},
+        {"net", "net"},       {"m2netm2g", "net"},      {"netm2g", "net"},
+        {"chr", "chr"},       {"chrm2g", "chr"},
+        {"chrmgr", "chrmgr"}, {"chrmgrm2g", "chrmgr"},
+        {"nonplayer", "nonplayer"}, {"nonplayerm2g", "nonplayer"},
+    };
+    for (auto& p : tryList) {
+        if (PyAPI::InjectModule(p.sysName, p.as)) {
+            FileLog::Write("[Bot] ENJEKTE: sys.modules['%s'] -> __main__.%s", p.sysName, p.as);
+        }
+    }
 
-    std::string sNet = PyAPI::EvalStr("str(net)");
-    FileLog::Write("[Bot] net        = %s", sNet.empty() ? "(YOK)" : sNet.c_str());
+    FileLog::Write("[Bot] === ENJEKSIYON SONRASI TEST ===");
+    FileLog::Write("[Bot] player        = %s", PyAPI::EvalStr("str(player)").c_str());
+    FileLog::Write("[Bot] chrmgr         = %s", PyAPI::EvalStr("str(chrmgr)").c_str());
+    FileLog::Write("[Bot] net            = %s", PyAPI::EvalStr("str(net)").c_str());
+    FileLog::Write("[Bot] GetTargetVID() = %s", PyAPI::EvalStr("str(player.GetTargetVID())").c_str());
+    FileLog::Write("[Bot] GetStatus(0)   = %s", PyAPI::EvalStr("str(player.GetStatus(0))").c_str());
+    FileLog::Write("[Bot] === TEST BITTI ===");
 
-    // HP okumayi dene — hem player.HP sabiti hem ham 0 ile
-    std::string hpConst = PyAPI::EvalStr("str(player.GetStatus(player.HP))");
-    FileLog::Write("[Bot] GetStatus(player.HP) = %s", hpConst.empty() ? "(HATA)" : hpConst.c_str());
-
-    std::string hp0 = PyAPI::EvalStr("str(player.GetStatus(0))");
-    FileLog::Write("[Bot] GetStatus(0)         = %s", hp0.empty() ? "(HATA)" : hp0.c_str());
-
-    std::string target = PyAPI::EvalStr("str(player.GetTargetVID())");
-    FileLog::Write("[Bot] GetTargetVID()       = %s", target.empty() ? "(HATA)" : target.c_str());
-
-    FileLog::Write("[Bot] === TANI BITTI ===");
-
-    Console::Log("[Bot] Baslatildi — tani C:\\m2t2bot_log.txt dosyasinda");
-    FileLog::Write("[Bot] Baslatildi");
+    Console::Log("[Bot] Tani tamam — C:\\m2t2bot_log.txt dosyasini kontrol et");
+    FileLog::Write("[Bot] Baslatildi (Tick pasif — once modul isimlerini gorelim)");
 }
 
 void Bot::Stop() {
@@ -57,15 +83,6 @@ void Bot::Stop() {
 }
 
 void Bot::Tick() {
-    // Hepsi isim-tabanli eval — crash-guvenli.
-    // Hedef: oyuncunun secili hedefine saldir (varsa).
-    int vid = PyAPI::EvalInt("player.GetTargetVID()");
-    if (vid <= 0) return;
-
-    char buf[96];
-    snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
-    if (PyAPI::EvalBool(buf)) return;          // olmusse atla
-
-    snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%d)", vid);
-    PyAPI::Exec(buf);                          // saldir
+    // PASIF. sys.modules dokumunu gorene kadar surekli Python cagrisi yapmiyoruz.
+    // Crash'in surekli tick'ten mi geldigini de boylece izole ediyoruz.
 }

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <vector>
 
 struct _object;
 using PyObject = _object;
@@ -11,6 +12,13 @@ namespace PyAPI {
 
 bool Init();
 void ImportModules(); // Init() basarili olduktan sonra cagir
+
+// sys.modules'taki TUM modul isimlerini dondurur (import KULLANMAZ, C API ile).
+std::vector<std::string> ModuleNames();
+
+// sys.modules[sysName] modulunu __main__'e mainName olarak kopyalar.
+// Boylece EvalInt("player.GetStatus(...)") gibi ifadeler calisabilir.
+bool InjectModule(const char* sysName, const char* mainName);
 
 // Python expression değerlendir: "player.GetStatus(0)" → int
 int         EvalInt(const char* expr);

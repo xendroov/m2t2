@@ -34,6 +34,12 @@ using tPyImport_AddModule   = void*(__cdecl*)(const char*);
 using tPyModule_GetDict     = void*(__cdecl*)(void*);
 using tPyErr_Occurred       = void*(__cdecl*)();
 using tPyErr_Print          = void(__cdecl*)();
+using tPyImport_GetModuleDict = void*(__cdecl*)();
+using tPyDict_Keys          = void*(__cdecl*)(void*);
+using tPyDict_GetItemString = void*(__cdecl*)(void*, const char*);
+using tPyDict_SetItemString = int(__cdecl*)(void*, const char*, void*);
+using tPyList_Size          = int(__cdecl*)(void*);
+using tPyList_GetItem       = void*(__cdecl*)(void*, int);
 
 static HMODULE              g_dll         = nullptr;
 static tPy_BuildValue       g_Build       = nullptr;
@@ -50,6 +56,12 @@ static tPyImport_AddModule  g_AddModule   = nullptr;
 static tPyModule_GetDict    g_ModGetDict  = nullptr;
 static tPyErr_Occurred      g_ErrOccurred = nullptr;
 static tPyErr_Print         g_ErrPrint    = nullptr;
+static tPyImport_GetModuleDict g_GetModuleDict = nullptr;
+static tPyDict_Keys         g_DictKeys    = nullptr;
+static tPyDict_GetItemString g_DictGetStr = nullptr;
+static tPyDict_SetItemString g_DictSetStr = nullptr;
+static tPyList_Size         g_ListSize    = nullptr;
+static tPyList_GetItem      g_ListGetItem = nullptr;
 static PyGILState_STATE     g_gilState    = 0;
 
 #define LOAD(var, sym) \
@@ -76,6 +88,12 @@ bool Init() {
     LOAD(g_ModGetDict,  PyModule_GetDict)
     LOAD(g_ErrOccurred, PyErr_Occurred)
     LOAD(g_ErrPrint,    PyErr_Print)
+    LOAD(g_GetModuleDict, PyImport_GetModuleDict)
+    LOAD(g_DictKeys,    PyDict_Keys)
+    LOAD(g_DictGetStr,  PyDict_GetItemString)
+    LOAD(g_DictSetStr,  PyDict_SetItemString)
+    LOAD(g_ListSize,    PyList_Size)
+    LOAD(g_ListGetItem, PyList_GetItem)
     Console::Log("[PyAPI] Hazir — python27 @ 0x%p", (void*)g_dll);
     return true;
 }
@@ -194,6 +212,47 @@ void ImportModules() {
         }
     }
     ReleaseGIL();
+}
+
+// sys.modules'taki tum modul isimlerini dondurur — import KULLANMAZ.
+// PyImport_GetModuleDict dogrudan sys.modules dict'ini verir (borrowed).
+std::vector<std::string> ModuleNames() {
+    std::vector<std::string> out;
+    AcquireGIL();
+    void* modules = g_GetModuleDict ? g_GetModuleDict() : nullptr;
+    if (modules && g_DictKeys && g_ListSize && g_ListGetItem && g_StrAsStr) {
+        void* keys = g_DictKeys(modules); // new ref
+        if (keys) {
+            int n = g_ListSize(keys);
+            for (int i = 0; i < n; ++i) {
+                void* k = g_ListGetItem(keys, i); // borrowed
+                if (k) {
+                    const char* s = g_StrAsStr(k);
+                    if (s) out.push_back(s);
+                }
+            }
+            g_DecRef(keys);
+        }
+    }
+    ReleaseGIL();
+    return out;
+}
+
+// sys.modules[sysName] → __main__[mainName]. import lock kullanmaz.
+bool InjectModule(const char* sysName, const char* mainName) {
+    bool ok = false;
+    AcquireGIL();
+    void* modules = g_GetModuleDict ? g_GetModuleDict() : nullptr;
+    void* mainDict = MainGlobals();
+    if (modules && mainDict && g_DictGetStr && g_DictSetStr) {
+        void* mod = g_DictGetStr(modules, sysName); // borrowed
+        if (mod) {
+            g_DictSetStr(mainDict, mainName, mod);
+            ok = true;
+        }
+    }
+    ReleaseGIL();
+    return ok;
 }
 
 PyObject* CallFn(uintptr_t addr, PyObject* args) {
