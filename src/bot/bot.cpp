@@ -77,16 +77,19 @@ static uintptr_t derefOr0(uintptr_t addr) {
 // Ana thread'de cagrilir. thiscall -> __fastcall(this, edx-dummy, bType, vid).
 typedef char(__fastcall* tSendAttack)(void* thisPtr, int edxDummy,
                                       unsigned char bType, unsigned int vid);
-static void GameAttack(uint32_t vid) {
-    if (!vid) return;
+// Donus: 1=paket gonderildi, 0=CanAct/Send basarisiz, -1=cagri patladi/netstream yok
+static int GameAttack(uint32_t vid) {
+    if (!vid) return -1;
     uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
     uint32_t netstream = 0;
     DumpRead(base + RVA_NETSTREAM, &netstream, 4);
-    if (!netstream) return;
+    if (!netstream) return -1;
     auto fn = reinterpret_cast<tSendAttack>(base + RVA_SENDATTACK);
+    int ret = -1;
     __try {
-        fn(reinterpret_cast<void*>(netstream), 0, 0, vid);  // bType=0 (normal)
-    } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        ret = (int)(unsigned char)fn(reinterpret_cast<void*>(netstream), 0, 0, vid);
+    } __except (EXCEPTION_EXECUTE_HANDLER) { ret = -1; }
+    return ret;
 }
 
 // Dosyaya bir ham bellek bolgesi yazar: nameLen, name, addr, len(u32), bytes.
@@ -324,10 +327,12 @@ void Bot::AttackArea() {
     bool dbg = (now - lastDbg) >= 3000;
     if (dbg) lastDbg = now;
 
-    int inRange = 0, attacked = 0;
+    int inRange = 0, attacked = 0, lastRet = -9;
+    const int MAX_ATTACK = 7;   // forum: ayni anda max 7 mob
     char buf[96];
     for (uint32_t vid : vids) {
         if (vid == myVid || vid == 0) continue;
+        if (attacked >= MAX_ATTACK) break;
 
         // Once mesafe — uzaktakileri hemen ele (en cok mob boyle elenir)
         snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
@@ -349,11 +354,11 @@ void Bot::AttackArea() {
             if (PyAPI::EvalStr(buf).find(m_targetName) == std::string::npos) continue;
         }
 
-        GameAttack(vid);   // SendAttackPacket(0, vid)
+        lastRet = GameAttack(vid);   // SendAttackPacket(0, vid)
         ++attacked;
     }
-    if (dbg) FileLog::Write("[Area] menzil(%.0f) ici=%d  saldirilan=%d",
-                            m_farmRange, inRange, attacked);
+    if (dbg) FileLog::Write("[Area] menzil(%.0f) ici=%d  saldirilan=%d  SendAttack_donus=%d",
+                            m_farmRange, inRange, attacked, lastRet);
 }
 
 // WndProc hook'tan her mesajda ANA THREAD'de cagrilir.

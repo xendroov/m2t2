@@ -37,6 +37,6 @@ public:
     int  m_spPotPct   = 30;     // SP bu yuzdenin altina dusunce
     int  m_hpPotKey   = 0x70;   // VK_F1 — HP iksiri bu quickslot'ta
     int  m_spPotKey   = 0x71;   // VK_F2 — MP iksiri bu quickslot'ta
-    float m_farmRange = 800.f;  // bu mesafedeki mob'lara saldir (sunucu menzili ~300; genis tut)
+    float m_farmRange = 2000.f; // forum onerisi: 2000 menzil
     char  m_targetName[64] = {0}; // bos=her mob; doluysa sadece bu ismi iceren mob
 };
