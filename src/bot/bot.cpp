@@ -70,7 +70,7 @@ static uintptr_t derefOr0(uintptr_t addr) {
 
 // Dosyaya bir ham bellek bolgesi yazar: nameLen, name, addr, len(u32), bytes.
 static void DumpRegion(FILE* f, const char* name, uintptr_t addr, uint32_t len) {
-    static uint8_t buf[0x1000];
+    static uint8_t buf[0x8000];
     if (len > sizeof(buf)) len = sizeof(buf);
     uint8_t nameLen = (uint8_t)strlen(name);
     fwrite(&nameLen, 1, 1, f);
@@ -78,7 +78,14 @@ static void DumpRegion(FILE* f, const char* name, uintptr_t addr, uint32_t len) 
     uint32_t a32 = (uint32_t)addr;
     fwrite(&a32, 4, 1, f);
     fwrite(&len, 4, 1, f);
-    if (addr) DumpRead(addr, buf, len); else memset(buf, 0, len);
+    memset(buf, 0, len);
+    // Sayfa sayfa oku — bir sayfa hatali olsa digerleri kurtulur
+    if (addr) {
+        for (uint32_t off = 0; off < len; off += 0x1000) {
+            uint32_t chunk = (len - off < 0x1000) ? (len - off) : 0x1000;
+            DumpRead(addr + off, buf + off, chunk);
+        }
+    }
     fwrite(buf, len, 1, f);
     FileLog::Write("[Dump] bolge %s @ 0x%08X (%u bayt)", name, a32, len);
 }
@@ -165,6 +172,13 @@ void Bot::DumpInfo() {
     DumpRegion(f, "GetInstancePtr", getInst,             0x800);
     DumpRegion(f, "GetPickedActor", ub + 0x2543310,      0x400);
     DumpRegion(f, "player_obj",     derefOr0(ub + 0x2EDD9E4), 0x200);
+
+    // CPythonNetworkStream: singleton *(base+0x2EDD794), ic SendOnClickPacket
+    // base+0x2661BD0. SendAttackPacket bu metodun komsusu — genis bolge cek.
+    uintptr_t netstream = derefOr0(ub + 0x2EDD794);
+    FileLog::Write("[Dump] netstream=0x%08X", (uint32_t)netstream);
+    DumpRegion(f, "netstream_obj",  netstream,           0x200);
+    DumpRegion(f, "net_code",       ub + 0x2661BD0 - 0x3000, 0x8000);
 
     fclose(f);
     FileLog::Write("[Dump] C:\\m2t2dump.bin yazildi — bu dosyayi gonder");
