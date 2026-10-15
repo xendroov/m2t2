@@ -12,6 +12,7 @@ add_library(m2t2bot SHARED
     src/core/console.cpp
     src/core/hooks.cpp
     src/core/memory.cpp
+    src/core/d3dhook.cpp
     src/game/pyapi.cpp
     src/game/entity.cpp
     src/game/player.cpp
