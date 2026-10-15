@@ -5,15 +5,24 @@
 #include "network/packet_logger.h"
 #include "bot/bot.h"
 
+// hModule DllMain'den saklaniyor — FreeLibraryAndExitThread icin
+static HMODULE g_hModule = nullptr;
+
 static DWORD WINAPI MainThread(LPVOID) {
     // En önce dosyaya yaz — konsol bile açılmadan önce
     FileLog::Write("=== DLL yuklendi. PID=%u ===", GetCurrentProcessId());
+
+    // Oyunun Python ortamini tam olarak baslatmasini bekle.
+    // Erken Python teması → import lock deadlock → oyun kapanir.
+    FileLog::Write("Oyun baslangic bekleniyor (3s)...");
+    Sleep(3000);
+    FileLog::Write("Bekleme tamam");
 
     FileLog::Write("AllocConsole...");
     Console::Open();
     FileLog::Write("Console::Open tamam");
 
-    Console::Log("DLL yuklendi. PID=%u", GetCurrentProcessId());
+    Console::Log("M2T2 Bot yuklendi. PID=%u", GetCurrentProcessId());
 
     FileLog::Write("PyAPI::Init cagiriliyor...");
     if (!PyAPI::Init()) {
@@ -37,23 +46,22 @@ static DWORD WINAPI MainThread(LPVOID) {
 
         Console::Log("Devam ediliyor (PyAPI olmadan)...");
         FileLog::Write("PyAPI olmadan devam ediliyor");
-        // Crash yerine devam et — klavye döngüsüne gir
         goto keyboard_loop;
     }
 
     FileLog::Write("PyAPI::Init basarili");
     Console::Log("[PyAPI] Hazir");
 
-    FileLog::Write("PyAPI::ImportModules cagiriliyor...");
-    PyAPI::ImportModules();
-    FileLog::Write("PyAPI::ImportModules tamam");
+    // ImportModules BURADAN KALDIRILDI.
+    // player/net/chr modülleri oyun baslatirken zaten __main__'e import edilmis olur.
+    // Bot basladiginda (INSERT) bot.cpp kendi Python kodunda import ediyor.
+    // Startup'ta import yapmak Python 2.7 import lock'u ile deadlock yapabilir.
 
     FileLog::Write("PacketLogger::InstallHooks...");
     PacketLogger::InstallHooks();
-    FileLog::Write("PacketLogger tamam");
+    FileLog::Write("PacketLogger tamam (SEND/RECV adresleri 0 ise atlanir)");
 
-    // Bot otomatik başlatılmıyor — INSERT'e basınca başlar
-    FileLog::Write("Bot hazir (INSERT ile baslatilacak)");
+    FileLog::Write("Bot hazir (INSERT=basla DELETE=cikis)");
 
 keyboard_loop:
     Console::Log("INSERT=bot ac/kapat  DELETE=cikis");
@@ -84,14 +92,14 @@ keyboard_loop:
     FileLog::Write("DLL kaldirildi");
     Console::Close();
 
-    FreeLibraryAndExitThread(GetModuleHandleA("m2t2bot.dll"), 0);
+    FreeLibraryAndExitThread(g_hModule, 0);
     return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
-        // DllMain'de minimal iş yap — thread aç
         DisableThreadLibraryCalls(hModule);
+        g_hModule = hModule;
         FileLog::Write("DllMain DLL_PROCESS_ATTACH");
         CreateThread(nullptr, 0, MainThread, nullptr, 0, nullptr);
     }

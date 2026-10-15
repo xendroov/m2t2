@@ -14,21 +14,27 @@ Bot& Bot::Instance() {
 static const char* BOT_PYTHON_CODE = R"(
 import threading as _t
 import time as _time
+import sys as _sys
 
-try:
-    import player as _player
-    import net as _net
-    import chr as _chr
-    import chrmgr as _chrmgr
-    _modules_ok = True
-except ImportError:
-    _modules_ok = False
+# sys.modules'dan al — import ifadesi import lock kullanir,
+# oyunun zaten yukledigi modulleri sys.modules'dan almak daha guvenli.
+def _get_mod(name):
+    return _sys.modules.get(name, None)
+
+_player   = _get_mod('player')
+_net      = _get_mod('net')
+_chr      = _get_mod('chr')
+_chrmgr   = _get_mod('chrmgr')
+_nonplayer = _get_mod('nonplayer')
+_modules_ok = (_player is not None and _chrmgr is not None)
 
 _m2bot_running = True
-_m2bot_tick    = 0.10   # saniye
+_m2bot_tick    = 0.15   # saniye
 
 def _m2bot_loop():
     global _m2bot_running
+    # Ilk iterasyonu biraz geciktir — oyunun Python ortami hazir olsun
+    _time.sleep(1.0)
     _log_interval = 5.0
     _last_log = 0.0
     while _m2bot_running:
@@ -42,9 +48,6 @@ def _m2bot_loop():
                     now = _time.time()
                     if now - _last_log >= _log_interval:
                         _last_log = now
-                        # HP/SP logla (console icin Python'dan dogrudan yazamazsin,
-                        # ama degerleri okuyabiliyoruz — ileride UI'ya tasinabilir)
-                        pass
                     # HP kritikse bekle
                     if float(hp) / maxhp < 0.10:
                         _time.sleep(2.0)
