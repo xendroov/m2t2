@@ -1,84 +1,95 @@
 #include <Windows.h>
+#include "core/filelog.h"
 #include "core/console.h"
 #include "game/pyapi.h"
 #include "network/packet_logger.h"
 #include "bot/bot.h"
 
-// -----------------------------------------------------------------------
-// DLL inject olduktan sonra burası çağrılır.
-// Inject araçları: RemoteDLL, Process Hacker, manuel CreateRemoteThread.
-// -----------------------------------------------------------------------
-
 static DWORD WINAPI MainThread(LPVOID) {
+    // En önce dosyaya yaz — konsol bile açılmadan önce
+    FileLog::Write("=== DLL yuklendi. PID=%u ===", GetCurrentProcessId());
+
+    FileLog::Write("AllocConsole...");
     Console::Open();
+    FileLog::Write("Console::Open tamam");
+
     Console::Log("DLL yuklendi. PID=%u", GetCurrentProcessId());
 
-    // 1) Python API'yi başlat (python27.dll bağlantısı)
+    FileLog::Write("PyAPI::Init cagiriliyor...");
     if (!PyAPI::Init()) {
+        FileLog::Write("PyAPI::Init BASARISIZ");
         Console::Log("PyAPI baslatma basarisiz!");
-        Console::Log("Yuklü Python DLL'leri kontrol ediliyor...");
+        Console::Log("Yuklü Python DLL'leri:");
 
-        // Hangi Python DLL'leri process'te var, listele
         const char* names[] = {
             "python27.dll","python26.dll","python24.dll",
-            "python.dll","python3.dll",nullptr
+            "python.dll","python3.dll", nullptr
         };
-        bool found = false;
         for (int i = 0; names[i]; ++i) {
             HMODULE h = GetModuleHandleA(names[i]);
-            if (h) { Console::Log("  BULUNDU: %s @ 0x%p", names[i], (void*)h); found = true; }
-            else    Console::Log("  yok: %s", names[i]);
+            if (h) {
+                Console::Log("  BULUNDU: %s @ 0x%p", names[i], (void*)h);
+                FileLog::Write("  BULUNDU: %s @ 0x%p", names[i], (void*)h);
+            } else {
+                FileLog::Write("  yok: %s", names[i]);
+            }
         }
-        if (!found)
-            Console::Log("Hic Python DLL bulunamadi — client Python kullanmiyor olabilir.");
 
-        Console::Log("Cikis icin bir tusa basin...");
-        system("pause");
-        Console::Close();
-        FreeLibraryAndExitThread(GetModuleHandleA("m2t2bot.dll"), 0);
-        return 0;
+        Console::Log("Devam ediliyor (PyAPI olmadan)...");
+        FileLog::Write("PyAPI olmadan devam ediliyor");
+        // Crash yerine devam et — klavye döngüsüne gir
+        goto keyboard_loop;
     }
 
-    // 2) Packet hook'larını kur (önce log, sonra bot)
+    FileLog::Write("PyAPI::Init basarili");
+    Console::Log("[PyAPI] Hazir");
+
+    FileLog::Write("PacketLogger::InstallHooks...");
     PacketLogger::InstallHooks();
+    FileLog::Write("PacketLogger tamam");
 
-    // 3) Botu başlat
+    FileLog::Write("Bot::Start...");
     Bot::Instance().Start();
+    FileLog::Write("Bot baslatildi");
 
-    // 3) Klavye kısayolları (Insert = durdur/başlat, Delete = eject)
+keyboard_loop:
+    Console::Log("INSERT=bot ac/kapat  DELETE=cikis");
+    FileLog::Write("Klavye dongusu basliyor");
+
     while (true) {
         if (GetAsyncKeyState(VK_INSERT) & 1) {
             if (Bot::Instance().IsRunning()) {
                 Bot::Instance().Stop();
-                Console::Log("Bot DURDURULDU (INSERT)");
+                Console::Log("Bot DURDURULDU");
+                FileLog::Write("Bot durduruldu");
             } else {
                 Bot::Instance().Start();
-                Console::Log("Bot BASLATILDI (INSERT)");
+                Console::Log("Bot BASLATILDI");
+                FileLog::Write("Bot baslatildi");
             }
         }
         if (GetAsyncKeyState(VK_DELETE) & 1) {
-            Console::Log("Eject ediliyor...");
+            FileLog::Write("DELETE - cikiliyor");
             break;
         }
         Sleep(50);
     }
 
-    // Temizlik
     Bot::Instance().Stop();
     PacketLogger::RemoveHooks();
-
-    Console::Log("DLL kaldirildi. Paket istatistigi: send=%llu recv=%llu",
-        PacketLogger::SentCount(), PacketLogger::RecvCount());
+    Console::Log("DLL kaldirildi.");
+    FileLog::Write("DLL kaldirildi");
     Console::Close();
 
-    FreeLibraryAndExitThread(
-        GetModuleHandleA("m2t2bot.dll"), 0);
+    FreeLibraryAndExitThread(GetModuleHandleA("m2t2bot.dll"), 0);
     return 0;
 }
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
+        // DllMain'de minimal iş yap — thread aç
         DisableThreadLibraryCalls(hModule);
+        FileLog::Write("DllMain DLL_PROCESS_ATTACH");
         CreateThread(nullptr, 0, MainThread, nullptr, 0, nullptr);
     }
     return TRUE;
