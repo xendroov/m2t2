@@ -301,8 +301,8 @@ void Bot::ScanTarget() {
     if (best && best != m_targetVid) {
         snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", best);
         std::string nm = PyAPI::EvalStr(buf);
-        Console::Log("[Bot] Hedef: %s (VID %u) ~%.0f", nm.c_str(), best, sqrtf(bestD2));
-        FileLog::Write("[Bot] Hedef: %s (VID %u) ~%.0f", nm.c_str(), best, sqrtf(bestD2));
+        Console::Log("[Bot] Hedef: %s (VID %u) ~%.1f", nm.c_str(), best, bestDist);
+        FileLog::Write("[Bot] Hedef: %s (VID %u) ~%.1f", nm.c_str(), best, bestDist);
         snprintf(buf, sizeof(buf), "player.SetTarget(%u)", best);
         PyAPI::Exec(buf);
     }
