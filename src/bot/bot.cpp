@@ -97,6 +97,12 @@ void Bot::DumpInfo() {
     PyAPI::InjectModule("chr",        "chr");
     PyAPI::InjectModule("nonplayer",  "nonplayer");
 
+    // Modullerin TUM fonksiyonlarini listele — dogru saldiri fonksiyonunu bulmak icin
+    FileLog::Write("[dir] net    = %s", PyAPI::EvalStr("' '.join(dir(net))").c_str());
+    FileLog::Write("[dir] player = %s", PyAPI::EvalStr("' '.join(dir(player))").c_str());
+    FileLog::Write("[dir] chr    = %s", PyAPI::EvalStr("' '.join(dir(chr))").c_str());
+    FileLog::Write("[dir] chrmgr = %s", PyAPI::EvalStr("' '.join(dir(chrmgr))").c_str());
+
     static const char* exprs[] = {
         "player.GetStatus", "player.GetMainCharacterIndex", "player.GetTargetVID",
         "player.GetMainCharacterPosition", "player.SetTarget",
@@ -212,6 +218,10 @@ std::vector<uint32_t> Bot::EnumerateVIDs() {
 // Yakindaki en yakin uygun mob'u bulup m_targetVid'e yazar.
 void Bot::ScanTarget() {
     std::vector<uint32_t> vids = EnumerateVIDs();
+    static DWORD lastDbg = 0;
+    DWORD nowDbg = GetTickCount();
+    bool dbg = (nowDbg - lastDbg) >= 3000;  // 3 saniyede bir detayli log
+    if (dbg) { lastDbg = nowDbg; FileLog::Write("[Scan] enumere VID sayisi=%d", (int)vids.size()); }
     if (vids.empty()) { m_targetVid = 0; return; }
 
     uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
@@ -219,12 +229,14 @@ void Bot::ScanTarget() {
     float mx = std::get<0>(mypos), my = std::get<1>(mypos);
 
     uint32_t best = 0; float bestD2 = m_farmRange * m_farmRange;
+    int cand = 0;
     char buf[96];
     for (uint32_t vid : vids) {
         if (vid == myVid || vid == 0) continue;
 
         snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
         if (PyAPI::EvalInt(buf) <= 0) continue;        // oyuncu/gecersiz — atla
+        ++cand;
 
         snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
         if (PyAPI::EvalBool(buf)) continue;            // olu — atla
@@ -247,10 +259,14 @@ void Bot::ScanTarget() {
         if (d2 < bestD2) { bestD2 = d2; best = vid; }
     }
 
+    if (dbg) FileLog::Write("[Scan] mob aday=%d  secilen VID=%u  myVID=%u  mypos=(%.0f,%.0f)",
+                            cand, best, myVid, mx, my);
+
     if (best && best != m_targetVid) {
         snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", best);
         std::string nm = PyAPI::EvalStr(buf);
         Console::Log("[Bot] Hedef: %s (VID %u) ~%.0f", nm.c_str(), best, sqrtf(bestD2));
+        FileLog::Write("[Bot] Hedef: %s (VID %u) ~%.0f", nm.c_str(), best, sqrtf(bestD2));
         snprintf(buf, sizeof(buf), "player.SetTarget(%u)", best);
         PyAPI::Exec(buf);
     }
