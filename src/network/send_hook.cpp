@@ -75,12 +75,16 @@ void InstallHooks() {
                        reinterpret_cast<uintptr_t>(Hooked_Send),
                        &g_origSend);
         Console::Log("Send hook kuruldu: 0x%08X", Offsets::Net::SEND_FN);
+    } else {
+        Console::Log("Send hook atlandi (adres 0 — offsets.h guncellenmeli)");
     }
     if (Offsets::Net::RECV_FN) {
         Hooks::Install(Offsets::Net::RECV_FN,
                        reinterpret_cast<uintptr_t>(Hooked_Recv),
                        &g_origRecv);
         Console::Log("Recv hook kuruldu: 0x%08X", Offsets::Net::RECV_FN);
+    } else {
+        Console::Log("Recv hook atlandi (adres 0 — offsets.h guncellenmeli)");
     }
 }
 

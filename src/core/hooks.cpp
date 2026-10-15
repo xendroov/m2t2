@@ -7,6 +7,7 @@ namespace Hooks {
 static const int TRAMPOLINE_SIZE = 64;
 
 bool Install(uintptr_t target, uintptr_t hook_fn, void** original_gate) {
+    if (!target || !hook_fn) return false;
     // Trampolin için çalıştırılabilir bellek al
     uint8_t* tramp = reinterpret_cast<uint8_t*>(
         VirtualAlloc(nullptr, TRAMPOLINE_SIZE, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
