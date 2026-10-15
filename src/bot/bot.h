@@ -15,4 +15,5 @@ private:
     std::atomic<bool> m_running{ false };
     bool  m_setup_done = false;
     DWORD m_lastTick   = 0;
+    DWORD m_lastStatus = 0;
 };

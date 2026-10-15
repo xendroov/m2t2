@@ -9,12 +9,13 @@ Bot& Bot::Instance() {
     return inst;
 }
 
+// Metin2 POINT sabitleri — GetStatus taramasiyla DOGRULANDI (23:35 log):
+//   1=LEVEL  3=EXP  4=NEXT_EXP  5=HP  6=MAX_HP  7=SP  8=MAX_SP
+
 void Bot::Start() {
     if (m_running.exchange(true)) return;
-    // Python'a BURADA dokunmuyoruz (bu bizim thread'imiz).
-    // Gercek is OnFrame()'de, EndScene hook'u uzerinden ANA THREAD'de yapilir.
-    Console::Log("[Bot] Baslatildi — ana thread'de calisacak (INSERT=dur)");
-    FileLog::Write("[Bot] Start() — m_running=true");
+    Console::Log("[Bot] Baslatildi — bir moba tikla, bot saldiracak (INSERT=dur)");
+    FileLog::Write("[Bot] Start()");
 }
 
 void Bot::Stop() {
@@ -23,40 +24,19 @@ void Bot::Stop() {
     FileLog::Write("[Bot] Stop()");
 }
 
-// Ilk karede bir kez: oyun modullerini __main__'e enjekte et + tani yap.
-// ANA THREAD'de calisir (EndScene), bu yuzden guvenli.
+// Ilk karede bir kez (ANA THREAD): oyun modullerini __main__'e enjekte et.
 void Bot::DoSetup() {
-    FileLog::Write("[Bot] === OnFrame ilk calisma (ANA THREAD) ===");
-
-    struct Pair { const char* sysName; const char* as; };
-    Pair tryList[] = {
-        {"playerm2g2", "player"}, {"m2netm2g", "net"},
-        {"chrmgrm2g", "chrmgr"},  {"chr", "chr"},
-        {"nonplayer", "nonplayer"},
-    };
-    for (auto& p : tryList) {
-        if (PyAPI::InjectModule(p.sysName, p.as))
-            FileLog::Write("[Bot] ENJEKTE: %s -> %s", p.sysName, p.as);
-    }
-
-    FileLog::Write("[Bot] player = %s", PyAPI::EvalStr("str(player)").c_str());
-    FileLog::Write("[Bot] net    = %s", PyAPI::EvalStr("str(net)").c_str());
-    FileLog::Write("[Bot] chrmgr = %s", PyAPI::EvalStr("str(chrmgr)").c_str());
-
-    // GetStatus sabitlerini bul: 0..20 arasi hangisi sifir-disi deger donuyor?
-    for (int i = 0; i <= 20; ++i) {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "player.GetStatus(%d)", i);
-        int v = PyAPI::EvalInt(buf);
-        if (v != 0) FileLog::Write("[Bot] GetStatus(%d) = %d", i, v);
-    }
-    FileLog::Write("[Bot] GetTargetVID() = %d", PyAPI::EvalInt("player.GetTargetVID()"));
-    FileLog::Write("[Bot] === SETUP BITTI — farm basliyor ===");
-
-    Console::Log("[Bot] Setup tamam — farm aktif");
+    FileLog::Write("[Bot] Setup (ANA THREAD) — moduller enjekte ediliyor");
+    PyAPI::InjectModule("playerm2g2", "player");
+    PyAPI::InjectModule("m2netm2g",   "net");
+    PyAPI::InjectModule("chrmgrm2g",  "chrmgr");
+    PyAPI::InjectModule("chr",        "chr");
+    PyAPI::InjectModule("nonplayer",  "nonplayer");
+    Console::Log("[Bot] Moduller hazir. Bir moba tikla -> otomatik vurur.");
+    FileLog::Write("[Bot] Setup tamam");
 }
 
-// D3D EndScene hook'tan her karede cagrilir — ANA THREAD.
+// D3D degil — WndProc hook'tan her mesajda ANA THREAD'de cagrilir.
 void Bot::OnFrame() {
     if (!m_running.load()) return;
 
@@ -65,10 +45,24 @@ void Bot::OnFrame() {
         m_setup_done = true;
     }
 
-    // ~150ms'de bir saldir (her kare degil)
     DWORD now = GetTickCount();
     if (now - m_lastTick < 150) return;
     m_lastTick = now;
+
+    int hp    = PyAPI::EvalInt("player.GetStatus(5)");   // HP
+    int maxhp = PyAPI::EvalInt("player.GetStatus(6)");   // MAX_HP
+
+    // 2 saniyede bir canli durum yaz (botun calistigini gorursun)
+    if (now - m_lastStatus >= 2000) {
+        m_lastStatus = now;
+        int sp  = PyAPI::EvalInt("player.GetStatus(7)");
+        int lvl = PyAPI::EvalInt("player.GetStatus(1)");
+        int tvid = PyAPI::EvalInt("player.GetTargetVID()");
+        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d  hedef=%d", lvl, hp, maxhp, sp, tvid);
+    }
+
+    // HP kritikse saldirma (olmemek icin)
+    if (maxhp > 0 && (hp * 100 / maxhp) < 10) return;
 
     // Secili hedefe saldir
     int vid = PyAPI::EvalInt("player.GetTargetVID()");
