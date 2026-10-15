@@ -8,75 +8,64 @@ Bot& Bot::Instance() {
     return inst;
 }
 
-// Python thread olarak calistirilan bot kodu.
-// C++ thread'den degil, Python'un kendi threading modulu uzerinden calisir.
-// Boylece game C extension'larini (player.GetStatus vb.) guvenli cagirabiliriz.
-static const char* BOT_PYTHON_CODE = R"(
-import threading as _t
-import time as _time
+// Bir kez cagrilir: sys.modules'tan modul referanslarini __main__'e yazar.
+// 'import player' DEMİYORUZ — import lock kullanir, crash yapabilir.
+// sys.modules.get() ile zaten yuklu modulleri aliyoruz.
+static const char* BOT_SETUP_CODE = R"(
 import sys as _sys
-
-# sys.modules'dan al — import ifadesi import lock kullanir,
-# oyunun zaten yukledigi modulleri sys.modules'dan almak daha guvenli.
-def _get_mod(name):
-    return _sys.modules.get(name, None)
-
-_player   = _get_mod('player')
-_net      = _get_mod('net')
-_chr      = _get_mod('chr')
-_chrmgr   = _get_mod('chrmgr')
-_nonplayer = _get_mod('nonplayer')
-_modules_ok = (_player is not None and _chrmgr is not None)
-
-_m2bot_running = True
-_m2bot_tick    = 0.15   # saniye
-
-def _m2bot_loop():
-    global _m2bot_running
-    # Ilk iterasyonu biraz geciktir — oyunun Python ortami hazir olsun
-    _time.sleep(1.0)
-    _log_interval = 5.0
-    _last_log = 0.0
-    while _m2bot_running:
-        try:
-            if _modules_ok:
-                hp     = _player.GetStatus(_player.HP)
-                maxhp  = _player.GetStatus(_player.MAX_HP)
-                sp     = _player.GetStatus(_player.SP)
-                maxsp  = _player.GetStatus(_player.MAX_SP)
-                if maxhp > 0:
-                    now = _time.time()
-                    if now - _last_log >= _log_interval:
-                        _last_log = now
-                    # HP kritikse bekle
-                    if float(hp) / maxhp < 0.10:
-                        _time.sleep(2.0)
-                        continue
-        except Exception:
-            pass
-        _time.sleep(_m2bot_tick)
-
-_m2bot_thread = _t.Thread(target=_m2bot_loop)
-_m2bot_thread.daemon = True
-_m2bot_thread.start()
+_m2bot_player  = _sys.modules.get('player')
+_m2bot_net     = _sys.modules.get('net')
+_m2bot_chr     = _sys.modules.get('chr')
+_m2bot_chrmgr  = _sys.modules.get('chrmgr')
+_m2bot_ok      = bool(_m2bot_player and _m2bot_net and _m2bot_chr and _m2bot_chrmgr)
 )";
 
-static const char* BOT_STOP_CODE =
-    "_m2bot_running = False\n";
+// Her tick'te cagrilir (~150ms). Threading yok — C++ thread'inden direkt calisir.
+static const char* BOT_TICK_CODE = R"(
+if _m2bot_ok:
+    try:
+        _hp    = _m2bot_player.GetStatus(_m2bot_player.HP)
+        _maxhp = _m2bot_player.GetStatus(_m2bot_player.MAX_HP)
+        if _maxhp > 0 and (_hp * 10) > _maxhp:
+            _vid = _m2bot_chr.Pick()
+            if _vid and _vid > 0:
+                _dead = _m2bot_chrmgr.IsDead(_vid)
+                _ispc = _m2bot_chrmgr.IsPC(_vid)
+                if not _dead and not _ispc:
+                    _m2bot_net.SendOnClickPacket(_vid)
+    except Exception:
+        pass
+)";
 
 void Bot::Start() {
     if (m_running.exchange(true)) return;
 
-    FileLog::Write("[Bot] Python thread baslatiliyor...");
-    PyAPI::Exec(BOT_PYTHON_CODE);
-    Console::Log("[Bot] Python thread baslatildi");
-    FileLog::Write("[Bot] Python thread baslatildi");
+    if (!m_setup_done) {
+        FileLog::Write("[Bot] Setup: moduller sys.modules'tan aliniyor...");
+        PyAPI::Exec(BOT_SETUP_CODE);
+        m_setup_done = true;
+
+        bool ok = PyAPI::EvalBool("_m2bot_ok");
+        if (ok) {
+            Console::Log("[Bot] Moduller hazir: player/net/chr/chrmgr");
+            FileLog::Write("[Bot] Moduller hazir");
+        } else {
+            Console::Log("[Bot] UYARI: Bazi moduller bulunamadi (_m2bot_ok=False)");
+            FileLog::Write("[Bot] UYARI: moduller yok");
+        }
+    }
+
+    Console::Log("[Bot] Baslatildi (INSERT=dur)");
+    FileLog::Write("[Bot] Baslatildi");
 }
 
 void Bot::Stop() {
     if (!m_running.exchange(false)) return;
-
-    PyAPI::Exec(BOT_STOP_CODE);
     Console::Log("[Bot] Durduruldu");
     FileLog::Write("[Bot] Durduruldu");
+}
+
+void Bot::Tick() {
+    // C++ keyboard loop'undan cagrilir — threading yok, crash riski minimal
+    PyAPI::Exec(BOT_TICK_CODE);
 }

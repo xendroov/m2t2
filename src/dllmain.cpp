@@ -67,6 +67,7 @@ keyboard_loop:
     Console::Log("INSERT=bot ac/kapat  DELETE=cikis");
     FileLog::Write("Klavye dongusu basliyor");
 
+    DWORD lastBotTick = 0;
     while (true) {
         if (GetAsyncKeyState(VK_INSERT) & 1) {
             if (Bot::Instance().IsRunning()) {
@@ -79,6 +80,14 @@ keyboard_loop:
                 FileLog::Write("Bot baslatildi");
             }
         }
+
+        // Bot aktifse her ~150ms'de bir tick cal
+        DWORD now = GetTickCount();
+        if (Bot::Instance().IsRunning() && (now - lastBotTick) >= 150) {
+            Bot::Instance().Tick();
+            lastBotTick = now;
+        }
+
         if (GetAsyncKeyState(VK_DELETE) & 1) {
             FileLog::Write("DELETE - cikiliyor");
             break;
