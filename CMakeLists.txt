@@ -33,22 +33,8 @@ target_compile_definitions(m2t2bot PRIVATE
     _CRT_SECURE_NO_WARNINGS
 )
 
-# python27.dll ile dinamik link — header'lar için Python 2.7 SDK gerekir.
-# İndir: https://www.python.org/downloads/release/python-2718/
-# CMake'e ekle: -DPython2_ROOT_DIR="C:/Python27"
-find_package(Python2 COMPONENTS Development QUIET)
-if(Python2_FOUND)
-    target_include_directories(m2t2bot PRIVATE ${Python2_INCLUDE_DIRS})
-    # Runtime'da GetProcAddress kullandığımız için lib'e link etmiyoruz
-    message(STATUS "Python2 headers: ${Python2_INCLUDE_DIRS}")
-else()
-    # Manuel fallback: PYTHON27_INCLUDE ortam değişkenine bak
-    if(DEFINED ENV{PYTHON27_INCLUDE})
-        target_include_directories(m2t2bot PRIVATE $ENV{PYTHON27_INCLUDE})
-    else()
-        message(WARNING "Python2 headers bulunamadi — PYTHON27_INCLUDE ortam degiskenini ayarla")
-    endif()
-endif()
+# python27.dll runtime'da GetProcAddress ile yukleniyor.
+# Python SDK veya .lib dosyasina GEREK YOK.
 
 # Metin2 32-bit process olduğu için DLL de 32-bit olmalı
 if(MSVC)
