@@ -16,7 +16,8 @@ private:
     Bot() = default;
     void DoSetup();   // ilk karede bir kez: modul enjeksiyon + tani
     void DumpInfo();  // oyun fonksiyon adreslerini + kodlarini dosyaya yazar
-    void ScanTarget();                    // yakindaki en yakin mob'u hedefle
+    void ScanTarget();                    // yakindaki en yakin mob'u hedefle (tek hedef mod)
+    void AttackArea();                    // menzildeki TUM mob'lara saldiri paketi
     std::vector<uint32_t> EnumerateVIDs(); // alive instance map'i gezer
     std::atomic<bool> m_dumpReq{ false };
     uint32_t m_targetVid = 0;
@@ -36,6 +37,6 @@ public:
     int  m_spPotPct   = 30;     // SP bu yuzdenin altina dusunce
     int  m_hpPotKey   = 0x70;   // VK_F1 — HP iksiri bu quickslot'ta
     int  m_spPotKey   = 0x71;   // VK_F2 — MP iksiri bu quickslot'ta
-    float m_farmRange = 5000.f; // bu mesafedeki mob'lari hedefle (koordinat birimi)
+    float m_farmRange = 800.f;  // bu mesafedeki mob'lara saldir (sunucu menzili ~300; genis tut)
     char  m_targetName[64] = {0}; // bos=her mob; doluysa sadece bu ismi iceren mob
 };

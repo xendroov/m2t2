@@ -200,6 +200,9 @@ void Bot::DumpInfo() {
     FileLog::Write("[Dump] netstream=0x%08X", (uint32_t)netstream);
     DumpRegion(f, "netstream_obj",  netstream,           0x200);
     DumpRegion(f, "net_code",       ub + 0x2661BD0 - 0x3000, 0x8000);
+    // .rdata debug string'leri — saldiri fonksiyonunu dogrulamak icin
+    // (0x2fdd97c onclick, 0x2fddfac/0x2fddfcc aday2, 0x2fde2e4 aday3 civari)
+    DumpRegion(f, "strings",        ub + 0x297D800,      0x1200);
 
     fclose(f);
     FileLog::Write("[Dump] C:\\m2t2dump.bin yazildi — bu dosyayi gonder");
@@ -309,6 +312,50 @@ void Bot::ScanTarget() {
     m_targetVid = best;
 }
 
+// Menzildeki TUM mob'lara hizlica SendAttackPacket gonderir (alan saldirisi,
+// animasyonsuz). Tek hedef secmez — referanstaki "range attack" mantigi.
+void Bot::AttackArea() {
+    std::vector<uint32_t> vids = EnumerateVIDs();
+    if (vids.empty()) return;
+
+    uint32_t myVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
+    static DWORD lastDbg = 0;
+    DWORD now = GetTickCount();
+    bool dbg = (now - lastDbg) >= 3000;
+    if (dbg) lastDbg = now;
+
+    int inRange = 0, attacked = 0;
+    char buf[96];
+    for (uint32_t vid : vids) {
+        if (vid == myVid || vid == 0) continue;
+
+        // Once mesafe — uzaktakileri hemen ele (en cok mob boyle elenir)
+        snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
+        float d = PyAPI::EvalFloat(buf);
+        if (d < 0.f || d > m_farmRange) continue;
+        ++inRange;
+
+        snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
+        if (PyAPI::EvalInt(buf) <= 0) continue;        // oyuncu/gecersiz
+        snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // olu
+        snprintf(buf, sizeof(buf), "chr.IsNPC(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // NPC
+        snprintf(buf, sizeof(buf), "chr.IsShop(%u)", vid);
+        if (PyAPI::EvalBool(buf)) continue;            // dukkanci
+
+        if (m_targetName[0]) {
+            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", vid);
+            if (PyAPI::EvalStr(buf).find(m_targetName) == std::string::npos) continue;
+        }
+
+        GameAttack(vid);   // SendAttackPacket(0, vid)
+        ++attacked;
+    }
+    if (dbg) FileLog::Write("[Area] menzil(%.0f) ici=%d  saldirilan=%d",
+                            m_farmRange, inRange, attacked);
+}
+
 // WndProc hook'tan her mesajda ANA THREAD'de cagrilir.
 void Bot::OnFrame() {
     // Dump istegi (END tusu) — bot kapali olsa bile calissin
@@ -359,21 +406,10 @@ void Bot::OnFrame() {
     char buf[96];
 
     if (m_autoFarm) {
-        // Periyodik tarama: en yakin mob'u hedefle
-        if (now - m_lastScan >= 600) {
+        // Alan saldirisi: menzildeki tum mob'lara hizlica saldir (her ~250ms tam tarama)
+        if (now - m_lastScan >= 250) {
             m_lastScan = now;
-            // mevcut hedef oldu/kayboldu mu?
-            if (m_targetVid) {
-                snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", m_targetVid);
-                if (PyAPI::EvalBool(buf)) m_targetVid = 0;
-            }
-            ScanTarget();
-        }
-        // Hedefe saldir — gercek SendAttackPacket (ana thread, guvenli)
-        if (m_targetVid) {
-            snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", m_targetVid);
-            if (PyAPI::EvalBool(buf)) { m_targetVid = 0; return; }
-            GameAttack(m_targetVid);
+            AttackArea();
         }
     } else {
         // Manuel mod: oyuncunun secili hedefine vur
