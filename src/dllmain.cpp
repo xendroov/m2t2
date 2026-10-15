@@ -57,6 +57,13 @@ keyboard_loop:
             }
         }
 
+        // END — bellek dump'i al (analiz icin)
+        if (GetAsyncKeyState(VK_END) & 1) {
+            Console::Log("[Dump] istendi — bir sonraki karede yazilacak");
+            FileLog::Write("END — dump istendi");
+            Bot::Instance().RequestDump();
+        }
+
         // DELETE — DLL'i kaldir
         if (GetAsyncKeyState(VK_DELETE) & 1) {
             FileLog::Write("DELETE — cikiliyor");

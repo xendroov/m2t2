@@ -20,6 +20,12 @@ std::vector<std::string> ModuleNames();
 // Boylece EvalInt("player.GetStatus(...)") gibi ifadeler calisabilir.
 bool InjectModule(const char* sysName, const char* mainName);
 
+// Bir Python builtin-fonksiyonun GERCEK C adresini dondurur.
+// expr ornegi: "chrmgr.IsDead" -> o fonksiyonun bellekteki adresi.
+// PyCFunctionObject->m_ml->ml_meth okunur. VMProtect'te bile calisir
+// cunku bellekteki acilmis kodu isaret eder.
+uintptr_t ResolveCFunc(const char* expr);
+
 // Python expression değerlendir: "player.GetStatus(0)" → int
 int         EvalInt(const char* expr);
 bool        EvalBool(const char* expr);

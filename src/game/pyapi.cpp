@@ -255,6 +255,27 @@ bool InjectModule(const char* sysName, const char* mainName) {
     return ok;
 }
 
+// Python builtin-fonksiyonun gercek C adresini cozer.
+// PyCFunctionObject (32-bit, release build):
+//   offset 0: ob_refcnt (4)
+//   offset 4: ob_type   (4)
+//   offset 8: m_ml      -> PyMethodDef*
+// PyMethodDef:
+//   offset 0: ml_name
+//   offset 4: ml_meth   -> gercek C fonksiyon adresi
+uintptr_t ResolveCFunc(const char* expr) {
+    uintptr_t result = 0;
+    AcquireGIL();
+    void* obj = EvalExpr(expr); // new ref — fonksiyon objesi
+    if (obj) {
+        uintptr_t m_ml = *reinterpret_cast<uintptr_t*>(reinterpret_cast<uint8_t*>(obj) + 8);
+        if (m_ml) result = *reinterpret_cast<uintptr_t*>(m_ml + 4);
+        g_DecRef(obj);
+    }
+    ReleaseGIL();
+    return result;
+}
+
 PyObject* CallFn(uintptr_t addr, PyObject* args) {
     if (!addr) return nullptr;
     auto fn  = reinterpret_cast<tPyCFunction>(addr);

@@ -7,11 +7,14 @@ public:
     static Bot& Instance();
     void Start();
     void Stop();
-    void OnFrame();   // D3D EndScene hook'tan (ANA THREAD) her karede cagrilir
+    void OnFrame();   // WndProc hook'tan (ANA THREAD) cagrilir
+    void RequestDump() { m_dumpReq.store(true); }  // END tusu — bellek dump'i iste
     bool IsRunning() const { return m_running.load(); }
 private:
     Bot() = default;
     void DoSetup();   // ilk karede bir kez: modul enjeksiyon + tani
+    void DumpInfo();  // oyun fonksiyon adreslerini + kodlarini dosyaya yazar
+    std::atomic<bool> m_dumpReq{ false };
     std::atomic<bool> m_running{ false };
     bool  m_setup_done = false;
     DWORD m_lastTick   = 0;
