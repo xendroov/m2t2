@@ -1,25 +1,23 @@
 #include "player.h"
 #include "pyapi.h"
-#include "offsets.h"
 
-// Offsets:: prefix ile kullan — "namespace Player" ile çakışmasın
-namespace O = Offsets;
+#include <cstdio>
 
 namespace Player {
 
 Vec3 GetPos() {
-    auto xyz = PyAPI::CallXYZ_Void(O::Player::GetMainCharacterPosition);
+    auto xyz = PyAPI::EvalXYZ("player.GetMainCharacterPosition()");
     return { std::get<0>(xyz), std::get<1>(xyz), std::get<2>(xyz) };
 }
 
-int32_t GetHP()    { return PyAPI::CallInt_Int(O::Player::GetStatus, 0); }
-int32_t GetHPMax() { return PyAPI::CallInt_Int(O::Player::GetStatus, 1); }
-int32_t GetMP()    { return PyAPI::CallInt_Int(O::Player::GetStatus, 2); }
-int32_t GetMPMax() { return PyAPI::CallInt_Int(O::Player::GetStatus, 3); }
+int32_t GetHP()    { return PyAPI::EvalInt("player.GetStatus(0)"); }
+int32_t GetHPMax() { return PyAPI::EvalInt("player.GetStatus(1)"); }
+int32_t GetMP()    { return PyAPI::EvalInt("player.GetStatus(2)"); }
+int32_t GetMPMax() { return PyAPI::EvalInt("player.GetStatus(3)"); }
 
-int32_t  GetLevel() { return PyAPI::CallInt_Void(O::Player::GetMainCharacterIndex); }
-uint32_t GetVID()   { return (uint32_t)PyAPI::CallInt_Void(O::Player::GetMainCharacterIndex); }
-uint64_t GetExp()   { return (uint64_t)PyAPI::CallInt_Void(O::Player::GetEXP); }
+int32_t  GetLevel() { return PyAPI::EvalInt("player.GetStatus(10)"); }
+uint32_t GetVID()   { return (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()"); }
+uint64_t GetExp()   { return (uint64_t)PyAPI::EvalInt("player.GetEXP()"); }
 
 float GetHPPercent() {
     auto mx = GetHPMax();
@@ -32,20 +30,27 @@ float GetMPPercent() {
 }
 
 void Attack(uint32_t targetVID) {
-    PyAPI::CallVoid_Int(O::Net::SendOnClickPacket, (int)targetVID);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%u)", targetVID);
+    PyAPI::Exec(buf);
 }
 
 void UseSkill(uint32_t /*skillVnum*/, uint32_t targetVID) {
-    PyAPI::CallVoid_Int(O::Player::SetTarget, (int)targetVID);
-    PyAPI::CallVoid_Int(O::Net::SendOnClickPacket, (int)targetVID);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "player.SetTarget(%u)", targetVID);
+    PyAPI::Exec(buf);
+    snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%u)", targetVID);
+    PyAPI::Exec(buf);
 }
 
 void MoveTo(float /*x*/, float /*y*/) {
-    // Python API'de koordinat bazlı move paketi yok; ileriki sürümde eklenecek
+    // Python API'de koordinat bazlı move paketi yok
 }
 
 void PickUp(uint32_t itemVID) {
-    PyAPI::CallVoid_Int(O::Net::SendOnClickPacket, (int)itemVID);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "net.SendOnClickPacket(%u)", itemVID);
+    PyAPI::Exec(buf);
 }
 
 } // namespace Player

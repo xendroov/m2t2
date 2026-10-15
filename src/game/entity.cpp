@@ -1,48 +1,55 @@
 #include "entity.h"
 #include "pyapi.h"
-#include "offsets.h"
 #include <algorithm>
 #include <tuple>
-
-using namespace PyAPI;
-using namespace Offsets;
-
-// Entity alanları: Chr modülü GetProjectPosition(vid)->(x,y,z), GetNameByVID(vid)->str
-// IsDead/IsPC de chrmgr modülünden geliyor
+#include <cstdio>
 
 uint32_t Entity::GetVID()   const { return vid; }
-bool     Entity::IsDead()   const { return CallBool_Int(ChrMgr::IsDead, (int)vid); }
-bool     Entity::IsMonster()const {
-    // Oyuncu değilse ve NPC değilse monster
-    if (CallBool_Int(ChrMgr::IsPC, (int)vid)) return false;
-    if (CallBool_Int(Chr::IsNPC,   (int)vid)) return false;
-    if (CallBool_Int(Chr::IsShop,  (int)vid)) return false;
+
+bool Entity::IsDead() const {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
+    return PyAPI::EvalBool(buf);
+}
+
+bool Entity::IsMonster() const {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "chrmgr.IsPC(%u)", vid);
+    if (PyAPI::EvalBool(buf)) return false;
+    snprintf(buf, sizeof(buf), "chr.IsNPC(%u)", vid);
+    if (PyAPI::EvalBool(buf)) return false;
+    snprintf(buf, sizeof(buf), "chr.IsShop(%u)", vid);
+    if (PyAPI::EvalBool(buf)) return false;
     return true;
 }
 
 Vec3 Entity::GetPos() const {
-    auto xyz = CallXYZ_Int(Chr::GetProjectPosition, (int)vid);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "chr.GetProjectPosition(%u)", vid);
+    auto xyz = PyAPI::EvalXYZ(buf);
     return { std::get<0>(xyz), std::get<1>(xyz), std::get<2>(xyz) };
 }
 
 std::string Entity::GetName() const {
-    return CallStr_Int(Chr::GetNameByVID, (int)vid);
+    char buf[64];
+    snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", vid);
+    return PyAPI::EvalStr(buf);
 }
 
-int32_t Entity::GetHP()    const { return 0; } // Mob HP Python API'sinde doğrudan yok
-int32_t Entity::GetHPMax() const { return 1; }
-uint32_t Entity::GetRace() const { return (uint32_t)CallInt_Int(NonPlayer::GetVnumByVID, (int)vid); }
+int32_t  Entity::GetHP()    const { return 0; }
+int32_t  Entity::GetHPMax() const { return 1; }
+
+uint32_t Entity::GetRace() const {
+    char buf[64];
+    snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
+    return (uint32_t)PyAPI::EvalInt(buf);
+}
 
 // -----------------------------------------------------------------------
-// EntityManager — dikkat: Python API VID listesini doğrudan sunmaz.
-// Yakın entity bulmak için chr.Pick() ve GetPickedVID() kullanılır,
-// ya da zemin tıklama / kamera tarama yapılır.
-// Gerçek bir entity listesi için packet sniffer'dan
-// HEADER_GC_CHARACTER_ADD / DEL takibi şarttır (send_hook.cpp).
+// EntityManager
 // -----------------------------------------------------------------------
 namespace EntityManager {
 
-// Bot, gördüğü entity'leri packet hook üzerinden bu listeye ekler.
 static std::vector<Entity> g_knownEntities;
 static std::mutex           g_mutex;
 
