@@ -15,7 +15,27 @@ static DWORD WINAPI MainThread(LPVOID) {
 
     // 1) Python API'yi başlat (python27.dll bağlantısı)
     if (!PyAPI::Init()) {
-        Console::Log("PyAPI baslatma basarisiz — bot calismayacak");
+        Console::Log("PyAPI baslatma basarisiz!");
+        Console::Log("Yuklü Python DLL'leri kontrol ediliyor...");
+
+        // Hangi Python DLL'leri process'te var, listele
+        const char* names[] = {
+            "python27.dll","python26.dll","python24.dll",
+            "python.dll","python3.dll",nullptr
+        };
+        bool found = false;
+        for (int i = 0; names[i]; ++i) {
+            HMODULE h = GetModuleHandleA(names[i]);
+            if (h) { Console::Log("  BULUNDU: %s @ 0x%p", names[i], (void*)h); found = true; }
+            else    Console::Log("  yok: %s", names[i]);
+        }
+        if (!found)
+            Console::Log("Hic Python DLL bulunamadi — client Python kullanmiyor olabilir.");
+
+        Console::Log("Cikis icin bir tusa basin...");
+        system("pause");
+        Console::Close();
+        FreeLibraryAndExitThread(GetModuleHandleA("m2t2bot.dll"), 0);
         return 0;
     }
 
