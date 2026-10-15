@@ -7,9 +7,22 @@ namespace Console {
 static FILE* g_con = nullptr;
 
 void Open() {
+    // Eğer zaten konsol varsa önce ayır
+    FreeConsole();
     AllocConsole();
     freopen_s(&g_con, "CONOUT$", "w", stdout);
-    SetConsoleTitleA("[M2T2 Bot]");
+    SetConsoleTitleA("[M2T2 Bot] - INSERT=ac/kapat  DELETE=cikis");
+
+    // Konsol penceresini ön plana getir ve kapat düğmesini devre dışı bırak
+    HWND hw = GetConsoleWindow();
+    if (hw) {
+        ShowWindow(hw, SW_SHOW);
+        SetForegroundWindow(hw);
+        // X butonunu kapat — kazara kapanmasın
+        HMENU hm = GetSystemMenu(hw, FALSE);
+        if (hm) DeleteMenu(hm, SC_CLOSE, MF_BYCOMMAND);
+    }
+
     Log("=== M2T2 Bot basladi ===");
 }
 
