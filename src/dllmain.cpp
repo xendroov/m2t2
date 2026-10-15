@@ -1,7 +1,7 @@
 #include <Windows.h>
 #include "core/filelog.h"
 #include "core/console.h"
-#include "core/d3dhook.h"
+#include "core/wndhook.h"
 #include "game/pyapi.h"
 #include "network/packet_logger.h"
 #include "bot/bot.h"
@@ -27,14 +27,15 @@ static DWORD WINAPI MainThread(LPVOID) {
     }
     FileLog::Write("PyAPI hazir");
 
-    // D3D9 EndScene hook'u kur — bot ANA THREAD'de calisacak (crash cozumu)
-    FileLog::Write("D3DHook::Install...");
-    if (D3DHook::Install()) {
-        Console::Log("[D3D] Hook aktif — bot ana thread'de guvenli calisir");
-        FileLog::Write("D3DHook kuruldu");
+    // WndProc hook'u kur — bot ANA THREAD'de (mesaj dongusu) calisacak.
+    // D3D hook bu client'ta tetiklenmedi; WndProc her Win32 penceresinde calisir.
+    FileLog::Write("WndHook::Install...");
+    if (WndHook::Install()) {
+        Console::Log("[Wnd] Hook aktif — bot ana thread'de guvenli calisir");
+        FileLog::Write("WndHook kuruldu");
     } else {
-        Console::Log("[D3D] HATA: EndScene hooklanamadi");
-        FileLog::Write("D3DHook BASARISIZ — bot calismayabilir");
+        Console::Log("[Wnd] HATA: pencere hooklanamadi");
+        FileLog::Write("WndHook BASARISIZ — bot calismayabilir");
     }
 
     // PacketLogger: SEND/RECV adresleri 0 oldugu icin sessizce atlaniyor
@@ -66,8 +67,8 @@ keyboard_loop:
     }
 
     Bot::Instance().Stop();
-    D3DHook::Remove();
-    // EndScene hook'u kaldirdiktan sonra, ucustaki kareler HookedEndScene'den
+    WndHook::Remove();
+    // WndProc'u geri yukledikten sonra, ucustaki cagrilar HookedWndProc'tan
     // cikana kadar bekle — yoksa DLL bosaltilirken crash olur.
     Sleep(300);
     PacketLogger::RemoveHooks();
