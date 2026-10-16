@@ -145,10 +145,11 @@ typedef char(__fastcall* tThis1)(void*, int, uint32_t);
 typedef char(__fastcall* tThis2)(void*, int, uint32_t, uint32_t);
 
 // Fonksiyon govdesini (SEH korumali) yerel tampona kopyala.
+// TUM pencereyi oku; okunamayan bayt 0 kalir (DumpRead basarisizda 0'lar).
+// Erken break YAPMA — yoksa tarama penceresi degisken olur (non-deterministik).
 static size_t CopyCode(uintptr_t fn, uint8_t* out, size_t cap) {
-    size_t n = 0;
-    for (; n < cap; ++n) if (!DumpRead(fn + n, &out[n], 1)) break;
-    return n;
+    for (size_t n = 0; n < cap; ++n) DumpRead(fn + n, &out[n], 1);
+    return cap;
 }
 
 // code icinde pat'i ara; bulursa ofsetini, yoksa -1.
@@ -214,15 +215,17 @@ void Bot::ResolveAttack() {
     int hi = FindPat(code, clen, hp, 2);
     if (hi >= 0 && hi + 3 < (int)clen) g_atk.header = code[hi + 3];
 
-    // 4b) ret N -> C2 NN 00  (NN = temizlenecek arg bayti: 4=1 arg, 8=2 arg)
-    for (int i = 0; i + 2 < (int)clen; ++i)
-        if (code[i]==0xC2 && code[i+2]==0x00 &&
-            (code[i+1]==0x04 || code[i+1]==0x08 || code[i+1]==0x0C)) {
-            g_atk.argBytes = code[i+1]; break;
+    // 4b) ret N: EPILOG'daki "5D C2 NN 00" (pop ebp; ret imm16).
+    // Sadece "C2 NN 00" aramak sahte eslesme veriyordu (fonksiyon ici bir imm/disp
+    // tesadufen 'C2 04 00' olabiliyor) -> arg=1/arg=2 NON-DETERMINISTIK cikiyordu.
+    // Yanlis arg sayisi = yanlis cagri convention = ESP bozulmasi = cop VID'ler.
+    // pop ebp ile birlikte aramak gercek epilog'u kesin bulur.
+    g_atk.argBytes = -1;
+    for (int i = 0; i + 3 < (int)clen; ++i)
+        if (code[i]==0x5D && code[i+1]==0xC2 && code[i+3]==0x00 &&
+            (code[i+2]==0x04 || code[i+2]==0x08 || code[i+2]==0x0C)) {
+            g_atk.argBytes = code[i+2]; break;
         }
-    // Bulunamazsa 2-arg varsay (standart SendAttackPacket(bType,vid) = ret 8).
-    // YANLIS arg sayisi ESP bozar; bu yuzden {4,8} disi degeri 8'e sabitliyoruz.
-    if (g_atk.argBytes != 4 && g_atk.argBytes != 8) g_atk.argBytes = 8;
 
     // 4c) push <str>'in kod-icindeki ofseti -> hemen onundeki E8 = Send
     int strOff = FindPat(code, clen, needle, 5);
@@ -261,6 +264,13 @@ void Bot::ResolveAttack() {
         // tek arg (ret 4) => VID [ebp+8]; iki arg => standart (bType@8, vid@C)
         g_atk.vidSlot = (g_atk.argBytes == 4) ? 0x08 : 0x0C;
     }
+
+    // KESIN KURAL: VID'in konumu arg sayisini belirler. vid [ebp+0xC]'de ise
+    // en az 2 stack arg vardir => ret 8. vid-konum tespiti (8B..->89) cok guvenilir
+    // (iki ayri oturumda da 0xC cikti); ret-tarama ise ara sira sapiyordu.
+    // Celiski olursa vid-konumuna guven. Bu, ret=4 yanlisligini kalici kapatir.
+    if (g_atk.vidSlot == 0x0C) g_atk.argBytes = 8;
+    if (g_atk.argBytes != 4 && g_atk.argBytes != 8) g_atk.argBytes = 8;  // emniyet
 
     g_atk.ok = true;
     m_attack_ready = true;
