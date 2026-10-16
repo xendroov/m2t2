@@ -78,6 +78,7 @@ keyboard_loop:
     // WndProc'u geri yukledikten sonra, ucustaki cagrilar HookedWndProc'tan
     // cikana kadar bekle — yoksa DLL bosaltilirken crash olur.
     Sleep(300);
+    Bot::Instance().ReleaseShared();  // artik OnFrame cagrilmiyor — guvenli
     PacketLogger::RemoveHooks();
     Console::Log("DLL kaldirildi.");
     FileLog::Write("DLL kaldirildi");

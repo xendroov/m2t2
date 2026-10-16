@@ -628,6 +628,11 @@ void Bot::AttackArea() {
         }
     }
 
+    // GUI durumu icin son tarama istatistigi
+    m_statEnum = nEnum;
+    m_statInRange = (int)cands.size();
+    m_statSent = sent;
+
     if (full) {
         Console::Log("[FARM] menzilde=%d gonderilen=%d reddedilen=%d hata=%d (enum=%d, %s)",
                      (int)cands.size(), sent, rej, err, nEnum, m_fastFilter ? "hizli" : "yavas");
@@ -640,6 +645,84 @@ void Bot::AttackArea() {
     }
 }
 
+// Harici ayar penceresi (m2t2gui.exe) ile paylasimli hafiza senkronu.
+// Bot kapali olsa da calisir — GUI buradan botu acabilir/kapatabilir.
+void Bot::SyncShared() {
+    if (!m_shm && !m_shmTried) {
+        m_shmTried = true;
+        bool created = false;
+        m_shm = M2T2_OpenShared(true, &m_shmHandle, &created);
+        if (m_shm) {
+            if (created || m_shm->magic != M2T2_SHM_MAGIC) {
+                // Biz olusturduk -> mevcut ayarlarimizi yaz (GUI bunlari gorsun)
+                M2T2_InitDefaults(m_shm);
+                m_shm->botEnabled    = m_running.load() ? 1 : 0;
+                m_shm->autoFarm      = m_autoFarm ? 1 : 0;
+                m_shm->autoPotion    = m_autoPotion ? 1 : 0;
+                m_shm->verbose       = m_verbose ? 1 : 0;
+                m_shm->farmRange     = m_farmRange;
+                m_shm->attackDelayMs = m_attackDelayMs;
+                m_shm->maxTargets    = m_maxTargets;
+                m_shm->attackType    = m_attackType;
+                m_shm->hpPotPct      = m_hpPotPct;
+                m_shm->spPotPct      = m_spPotPct;
+                m_shm->hpPotKey      = m_hpPotKey;
+                m_shm->spPotKey      = m_spPotKey;
+                strncpy(m_shm->targetName, m_targetName, sizeof(m_shm->targetName) - 1);
+            }
+            m_shmEnPrev = m_shm->botEnabled;
+            FileLog::Write("[SHM] paylasimli hafiza hazir (%s)", created ? "olusturuldu" : "baglandi");
+            Console::Log("[SHM] Ayar penceresi kanali hazir");
+        }
+    }
+    if (!m_shm) return;
+
+    m_shm->dllHeartbeat++;   // GUI "bagli" gorsun
+
+    // ON/OFF iki yonlu: GUI degistirdiyse uygula; yoksa INSERT'i GUI'ye yansit
+    int32_t cur = m_shm->botEnabled;
+    if (cur != m_shmEnPrev) {
+        bool en = (cur != 0);
+        if (en != m_running.load()) { if (en) Start(); else Stop(); }
+    } else {
+        m_shm->botEnabled = m_running.load() ? 1 : 0;
+    }
+    m_shmEnPrev = m_shm->botEnabled;
+
+    // Ayarlar: GUI -> bot (makul sinirlarla)
+    m_autoFarm   = (m_shm->autoFarm   != 0);
+    m_autoPotion = (m_shm->autoPotion != 0);
+    m_verbose    = (m_shm->verbose    != 0);
+    if (m_shm->farmRange     >= 0.f && m_shm->farmRange <= 100000.f) m_farmRange = m_shm->farmRange;
+    if (m_shm->attackDelayMs >= 30  && m_shm->attackDelayMs <= 5000) m_attackDelayMs = m_shm->attackDelayMs;
+    if (m_shm->maxTargets    >= 1   && m_shm->maxTargets <= 50)      m_maxTargets = m_shm->maxTargets;
+    m_attackType = m_shm->attackType & 0xFF;
+    m_hpPotPct   = m_shm->hpPotPct;
+    m_spPotPct   = m_shm->spPotPct;
+    if (m_shm->hpPotKey) m_hpPotKey = m_shm->hpPotKey;
+    if (m_shm->spPotKey) m_spPotKey = m_shm->spPotKey;
+    memcpy(m_targetName, m_shm->targetName, sizeof(m_targetName));
+    m_targetName[sizeof(m_targetName) - 1] = 0;
+
+    // Durum: bot -> GUI
+    m_shm->attackReady = m_attack_ready ? 1 : 0;
+    m_shm->fastFilter  = m_fastFilter ? 1 : 0;
+    m_shm->curHp = m_curHp;   m_shm->curMaxHp = m_curMaxHp;
+    m_shm->curSp = m_curSp;   m_shm->curMaxSp = m_curMaxSp;
+    m_shm->curLevel = m_curLevel;
+    m_shm->lastEnum = m_statEnum;
+    m_shm->lastInRange = m_statInRange;
+    m_shm->lastSent = m_statSent;
+    m_shm->attackFnRva = g_atk.fn
+        ? (uint32_t)(g_atk.fn - (uintptr_t)GetModuleHandleA(nullptr)) : 0;
+}
+
+// DLL kaldirilirken cagrilir (WndHook kaldirildiktan SONRA — artik OnFrame yok).
+void Bot::ReleaseShared() {
+    if (m_shm)       { UnmapViewOfFile(m_shm); m_shm = nullptr; }
+    if (m_shmHandle) { CloseHandle(m_shmHandle); m_shmHandle = nullptr; }
+}
+
 // WndProc hook'tan her mesajda ANA THREAD'de cagrilir.
 void Bot::OnFrame() {
     // Dump istegi (END tusu) — bot kapali olsa bile calissin
@@ -647,18 +730,21 @@ void Bot::OnFrame() {
         DumpInfo();
     }
 
+    DWORD now = GetTickCount();
+    // Mesaj selinde ana thread'i bogmamak icin kucuk bir kapi (~33Hz).
+    // Her is bu kapidan sonra; saldiri kendi araliginda tetiklenir (aninda tepki).
+    if (now - m_lastTick < 30) return;
+    m_lastTick = now;
+
+    // GUI <-> bot senkron (bot kapali olsa da — GUI buradan acabilir)
+    SyncShared();
+
     if (!m_running.load()) return;
 
     if (!m_setup_done) {
         DoSetup();
         m_setup_done = true;
     }
-
-    DWORD now = GetTickCount();
-    // Mesaj selinde ana thread'i bogmamak icin kucuk bir kapi (~33Hz).
-    // Eskiden 150ms idi; saldiri artik bundan BAGIMSIZ tetikleniyor (aninda tepki).
-    if (now - m_lastTick < 30) return;
-    m_lastTick = now;
 
     // --- Durum + iksir: ~200ms'de bir, TEK batch eval (5 ayri compile yerine 1) ---
     if (now - m_lastStatusRead >= 200) {
@@ -668,11 +754,12 @@ void Bot::OnFrame() {
             "(player.GetStatus(5),player.GetStatus(6),player.GetStatus(7),"
             "player.GetStatus(8),player.GetStatus(1))", st, 5);
         m_curHp = st[0]; m_curMaxHp = st[1];
-        int sp = st[2], maxsp = st[3], lvl = st[4];
+        m_curSp = st[2]; m_curMaxSp = st[3]; m_curLevel = st[4];
 
         if (now - m_lastStatus >= 2000) {
             m_lastStatus = now;
-            Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d", lvl, m_curHp, m_curMaxHp, sp, maxsp);
+            Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d",
+                         m_curLevel, m_curHp, m_curMaxHp, m_curSp, m_curMaxSp);
         }
         if (m_autoPotion) {
             if (m_curMaxHp > 0 && (m_curHp * 100 / m_curMaxHp) < m_hpPotPct && (now - m_lastHpPot) > 800) {
@@ -680,7 +767,7 @@ void Bot::OnFrame() {
                 m_lastHpPot = now;
                 FileLog::Write("[Bot] HP %%%d - iksir (F%d)", m_curHp * 100 / m_curMaxHp, m_hpPotKey - 0x6F);
             }
-            if (maxsp > 0 && (sp * 100 / maxsp) < m_spPotPct && (now - m_lastSpPot) > 800) {
+            if (m_curMaxSp > 0 && (m_curSp * 100 / m_curMaxSp) < m_spPotPct && (now - m_lastSpPot) > 800) {
                 WndHook::SendKey(m_spPotKey);
                 m_lastSpPot = now;
             }

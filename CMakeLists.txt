@@ -43,3 +43,26 @@ target_compile_definitions(m2t2bot PRIVATE
 if(MSVC)
     target_compile_options(m2t2bot PRIVATE /W3 /O2)
 endif()
+
+# ---------------------------------------------------------------------
+#  Harici ayar penceresi (m2t2gui.exe) — DLL ile paylasimli hafiza uzerinden
+#  konusur. Ayni cozumle (Win32) derlenir: cmake --build build --config Release
+#  ciktisi: build/Release/m2t2gui.exe
+# ---------------------------------------------------------------------
+add_executable(m2t2gui WIN32 gui/main.cpp)
+
+target_include_directories(m2t2gui PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_compile_definitions(m2t2gui PRIVATE
+    WIN32_LEAN_AND_MEAN
+    NOMINMAX
+    _CRT_SECURE_NO_WARNINGS
+)
+
+target_link_libraries(m2t2gui PRIVATE comctl32)
+
+if(MSVC)
+    target_compile_options(m2t2gui PRIVATE /W3 /O2)
+endif()
