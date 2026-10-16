@@ -115,6 +115,33 @@ static uintptr_t derefOr0(uintptr_t addr) {
     return v;
 }
 
+// Belirli bir VID'in instance pointer'ini (RB-tree node +0x14) bulur.
+// (speedhack/wallhack icin ana karakterin CInstanceBase'ini almak icin)
+static uintptr_t FindInstanceByVid(uint32_t wantVid) {
+    if (!wantVid) return 0;
+    uintptr_t base = (uintptr_t)GetModuleHandleA(nullptr);
+    uint32_t mgr = 0; DumpRead(base + RVA_CHARMGR, &mgr, 4);
+    if (!mgr) return 0;
+    uint32_t head = 0, size = 0;
+    DumpRead(mgr + MAP_OFF,     &head, 4);
+    DumpRead(mgr + MAP_OFF + 4, &size, 4);
+    if (!head || !size || size > 8000) return 0;
+    uint32_t root = 0; DumpRead(head + 4, &root, 4);
+    static uint32_t stack[2048]; int sp = 0, guard = 0;
+    if (root && root != head) stack[sp++] = root;
+    while (sp > 0 && guard++ < 16000) {
+        uint32_t n = stack[--sp];
+        if (!n || n == head) continue;
+        uint8_t isnil = 1; DumpRead(n + 0x0D, &isnil, 1);
+        if (isnil) continue;
+        uint32_t vid = 0; DumpRead(n + 0x10, &vid, 4);
+        if (vid == wantVid) { uint32_t inst = 0; DumpRead(n + 0x14, &inst, 4); return inst; }
+        uint32_t l = 0, r = 0; DumpRead(n + 0x00, &l, 4); DumpRead(n + 0x08, &r, 4);
+        if (sp < 2046) { if (l && l != head) stack[sp++] = l; if (r && r != head) stack[sp++] = r; }
+    }
+    return 0;
+}
+
 // =====================================================================
 //  SALDIRI FONKSIYONU COZUMLEME (runtime imza taramasi)
 // ---------------------------------------------------------------------
@@ -433,6 +460,21 @@ void Bot::DumpInfo() {
     if (g_atk.sendFn) DumpRegion(f, "Send_fn",     g_atk.sendFn, 0x200);
     // Dogrulanan yedek Send/Seq adreslerini de cek (karsilastirma)
     DumpRegion(f, "Send_fallback", ub + RVA_SEND_FALLBACK, 0x200);
+
+    // --- SPEEDHACK analizi: ana karakter instance + canli hiz degerleri ---
+    // Bu degerleri (MOVING_SPEED vb.) instance dump'inda arayip ofsetini buluruz.
+    uint32_t mainVid = (uint32_t)PyAPI::EvalInt("player.GetMainCharacterIndex()");
+    int moveSpd = PyAPI::EvalInt("player.GetStatus(player.MOVING_SPEED)");
+    int atkSpd  = PyAPI::EvalInt("player.GetStatus(player.ATT_SPEED)");
+    int castSpd = PyAPI::EvalInt("player.GetStatus(player.CASTING_SPEED)");
+    uintptr_t inst = FindInstanceByVid(mainVid);
+    FileLog::Write("[Dump] mainVID=%u instance=0x%08X MOVING_SPEED=%d ATT_SPEED=%d CASTING_SPEED=%d",
+                   mainVid, (uint32_t)inst, moveSpd, atkSpd, castSpd);
+    DumpRegion(f, "main_instance", inst, 0x2000);
+
+    // --- WALLHACK analizi: genis .rdata string bolgesi (collision/physics
+    //     fonksiyonlarini string referansindan bulmak icin) ---
+    DumpRegion(f, "strings_wide", ub + 0x2978000, 0x8000);
 
     fclose(f);
     FileLog::Write("[Dump] C:\\m2t2dump.bin yazildi — bu dosyayi gonder");

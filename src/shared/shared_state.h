@@ -34,9 +34,10 @@ struct M2T2Shared {
     int32_t  spPotPct;       // SP bu %'nin altinda iksir
     int32_t  hpPotKey;       // VK kodu (F1=0x70)
     int32_t  spPotKey;       // VK kodu (F2=0x71)
-    int32_t  speedHackOn;    // 0/1 (henuz DLL'de aktif degil — yakinda)
+    int32_t  speedHackOn;    // 0/1 hareket hizi hilesi (DLL'de hedef bulununca aktif)
     int32_t  attackSpeedPct; // % (yakinda)
-    int32_t  moveSpeedPct;   // % (yakinda)
+    int32_t  moveSpeedPct;   // % hareket hizi carpani
+    int32_t  wallHackOn;     // 0/1 collision kapat (DLL'de hedef bulununca aktif)
     char     targetName[64]; // mob isim filtresi (bos = hepsi)
 
     // --- DURUM (DLL yazar, GUI okur) ---
@@ -49,7 +50,7 @@ struct M2T2Shared {
     uint32_t attackFnRva;    // cozulen SendAttackPacket RVA
     uint32_t playerVid;      // ana karakter VID
 
-    int32_t  reserved[16];   // ileride alan eklemek icin (yerlesim bozulmaz)
+    int32_t  reserved[15];   // ileride alan eklemek icin (yerlesim bozulmaz)
 };
 #pragma pack(pop)
 
@@ -63,7 +64,7 @@ static inline void M2T2_InitDefaults(M2T2Shared* s) {
     s->autoPotion     = 1;
     s->verbose        = 1;
     s->farmRange      = 2000.0f;
-    s->attackDelayMs  = 200;
+    s->attackDelayMs  = 150;
     s->maxTargets     = 7;
     s->attackType     = 0;
     s->hpPotPct       = 50;
@@ -72,7 +73,8 @@ static inline void M2T2_InitDefaults(M2T2Shared* s) {
     s->spPotKey       = 0x71;  // F2
     s->speedHackOn    = 0;
     s->attackSpeedPct = 100;
-    s->moveSpeedPct   = 100;
+    s->moveSpeedPct   = 150;
+    s->wallHackOn     = 0;
     s->targetName[0]  = 0;
 }
 

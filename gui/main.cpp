@@ -15,8 +15,8 @@
 
 // ---- Kontrol kimlikleri ----
 enum {
-    ID_BOT = 1001, ID_MODE, ID_POT, ID_DEBUG, ID_SPEED,
-    ID_RANGE, ID_DELAY, ID_MAXT, ID_ATYPE, ID_HPPCT, ID_SPPCT,
+    ID_BOT = 1001, ID_MODE, ID_POT, ID_DEBUG, ID_SPEED, ID_WALL,
+    ID_RANGE, ID_DELAY, ID_MAXT, ID_ATYPE, ID_HPPCT, ID_SPPCT, ID_MOVE,
     ID_NAME
 };
 
@@ -27,9 +27,9 @@ static char       g_ini[MAX_PATH] = {0};
 static bool       g_loading = false;   // kontrolleri shm'den yuklerken yazma
 
 // Kontrol HWND'leri
-static HWND hBot, hMode, hPot, hDebug, hSpeed;
-static HWND hRange, hDelay, hMaxT, hAType, hHp, hSp;
-static HWND hRangeV, hDelayV, hMaxTV, hATypeV, hHpV, hSpV;
+static HWND hBot, hMode, hPot, hDebug, hSpeed, hWall;
+static HWND hRange, hDelay, hMaxT, hAType, hHp, hSp, hMove;
+static HWND hRangeV, hDelayV, hMaxTV, hATypeV, hHpV, hSpV, hMoveV;
 static HWND hName;
 static HWND hConn, hFn, hStHp, hStSp, hStLvl, hStFarm;
 
@@ -85,6 +85,8 @@ static void SaveIni() {
     PUT("autopot", g_shm->autoPotion);
     PUT("verbose", g_shm->verbose);
     PUT("speed",   g_shm->speedHackOn);
+    PUT("wall",    g_shm->wallHackOn);
+    PUT("movepct", g_shm->moveSpeedPct);
     #undef PUT
     WritePrivateProfileStringA("m2t2", "name", g_shm->targetName, g_ini);
 }
@@ -99,6 +101,8 @@ static void LoadIni(M2T2Shared* s) {
     s->autoPotion    = GetPrivateProfileIntA("m2t2", "autopot",  s->autoPotion, g_ini);
     s->verbose       = GetPrivateProfileIntA("m2t2", "verbose",  s->verbose, g_ini);
     s->speedHackOn   = GetPrivateProfileIntA("m2t2", "speed",    s->speedHackOn, g_ini);
+    s->wallHackOn    = GetPrivateProfileIntA("m2t2", "wall",     s->wallHackOn, g_ini);
+    s->moveSpeedPct  = GetPrivateProfileIntA("m2t2", "movepct",  s->moveSpeedPct, g_ini);
     GetPrivateProfileStringA("m2t2", "name", s->targetName, s->targetName,
                              sizeof(s->targetName), g_ini);
 }
@@ -112,12 +116,14 @@ static void LoadControls() {
     SetCheck(hPot,   g_shm->autoPotion != 0);
     SetCheck(hDebug, g_shm->verbose != 0);
     SetCheck(hSpeed, g_shm->speedHackOn != 0);
+    SetCheck(hWall,  g_shm->wallHackOn != 0);
     SetTrack(hRange, (int)g_shm->farmRange);
     SetTrack(hDelay, g_shm->attackDelayMs);
     SetTrack(hMaxT,  g_shm->maxTargets);
     SetTrack(hAType, g_shm->attackType);
     SetTrack(hHp,    g_shm->hpPotPct);
     SetTrack(hSp,    g_shm->spPotPct);
+    SetTrack(hMove,  g_shm->moveSpeedPct);
     SetWindowTextA(hName, g_shm->targetName);
     g_loading = false;
 }
@@ -130,12 +136,14 @@ static void ApplyControls() {
     g_shm->autoPotion  = Checked(hPot)   ? 1 : 0;
     g_shm->verbose     = Checked(hDebug) ? 1 : 0;
     g_shm->speedHackOn = Checked(hSpeed) ? 1 : 0;
+    g_shm->wallHackOn  = Checked(hWall)  ? 1 : 0;
     g_shm->farmRange     = (float)TrackPos(hRange);
     g_shm->attackDelayMs = TrackPos(hDelay);
     g_shm->maxTargets    = TrackPos(hMaxT);
     g_shm->attackType    = TrackPos(hAType);
     g_shm->hpPotPct      = TrackPos(hHp);
     g_shm->spPotPct      = TrackPos(hSp);
+    g_shm->moveSpeedPct  = TrackPos(hMove);
     char nm[64] = {0};
     GetWindowTextA(hName, nm, sizeof(nm));
     strncpy(g_shm->targetName, nm, sizeof(g_shm->targetName) - 1);
@@ -147,6 +155,7 @@ static void ApplyControls() {
     SetLblF(hATypeV, "%d", g_shm->attackType);
     SetLblF(hHpV,    "%%%d", g_shm->hpPotPct);
     SetLblF(hSpV,    "%%%d", g_shm->spPotPct);
+    SetLblF(hMoveV,  "%%%d", g_shm->moveSpeedPct);
     SaveIni();
 }
 
@@ -184,13 +193,14 @@ static void RefreshStatus() {
 }
 
 static void BuildUI(HWND w) {
-    int x = 14, xv = 300, ww = 274;
+    int x = 14, xv = 300;
     MkStatic(w, "— AYARLAR —", x, 8, 200, 18);
     hBot   = MkCheck(w, "BOT ACIK (INSERT ile ayni)",        ID_BOT,   x, 30,  260);
     hMode  = MkCheck(w, "Target modu (bos = menzil saldiri)", ID_MODE,  x, 56,  260);
     hPot   = MkCheck(w, "Otomatik iksir (F1/F2)",             ID_POT,   x, 82,  260);
     hDebug = MkCheck(w, "Debug log",                          ID_DEBUG, x, 108, 260);
-    hSpeed = MkCheck(w, "Speedhack (yakinda)",                ID_SPEED, x, 134, 260);
+    hSpeed = MkCheck(w, "Speedhack (yakinda)",                ID_SPEED, x,       134, 190);
+    hWall  = MkCheck(w, "Wallhack (yakinda)",                 ID_WALL,  x + 196, 134, 190);
 
     MkStatic(w, "Menzil (range)", x, 164, 180, 16);  hRangeV = MkStatic(w, "", xv, 164, 108, 16);
     hRange = MkTrack(w, ID_RANGE, x, 182, 390, 100, 5000);
@@ -210,16 +220,19 @@ static void BuildUI(HWND w) {
     MkStatic(w, "SP iksir esigi", x, 414, 180, 16); hSpV = MkStatic(w, "", xv, 414, 108, 16);
     hSp    = MkTrack(w, ID_SPPCT, x, 432, 390, 0, 100);
 
-    MkStatic(w, "Mob ismi filtresi (bos = hepsi)", x, 466, 260, 16);
-    hName  = MkEdit(w, ID_NAME, x, 484, 390);
+    MkStatic(w, "Hareket hizi % (speedhack)", x, 464, 220, 16); hMoveV = MkStatic(w, "", xv, 464, 108, 16);
+    hMove  = MkTrack(w, ID_MOVE, x, 482, 390, 100, 400);
 
-    MkStatic(w, "— DURUM —", x, 516, 200, 18);
-    hConn   = MkStatic(w, "", x, 538, 404, 16);
-    hFn     = MkStatic(w, "", x, 558, 404, 16);
-    hStHp   = MkStatic(w, "", x, 578, 200, 16);
-    hStSp   = MkStatic(w, "", x + 200, 578, 200, 16);
-    hStLvl  = MkStatic(w, "", x, 598, 200, 16);
-    hStFarm = MkStatic(w, "", x, 618, 404, 16);
+    MkStatic(w, "Mob ismi filtresi (bos = hepsi)", x, 514, 260, 16);
+    hName  = MkEdit(w, ID_NAME, x, 532, 390);
+
+    MkStatic(w, "— DURUM —", x, 566, 200, 18);
+    hConn   = MkStatic(w, "", x, 588, 404, 16);
+    hFn     = MkStatic(w, "", x, 608, 404, 16);
+    hStHp   = MkStatic(w, "", x, 628, 200, 16);
+    hStSp   = MkStatic(w, "", x + 200, 628, 200, 16);
+    hStLvl  = MkStatic(w, "", x, 648, 200, 16);
+    hStFarm = MkStatic(w, "", x, 668, 404, 16);
 }
 
 static LRESULT CALLBACK WndProc(HWND w, UINT m, WPARAM wp, LPARAM lp) {
@@ -277,7 +290,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE, LPSTR, int nShow) {
 
     HWND w = CreateWindowA("M2T2GuiWnd", "M2T2 Bot — Ayar Penceresi",
                            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-                           CW_USEDEFAULT, CW_USEDEFAULT, 448, 684,
+                           CW_USEDEFAULT, CW_USEDEFAULT, 448, 742,
                            nullptr, nullptr, hInst, nullptr);
     if (!w) return 1;
     if (!g_shm) MessageBoxA(w, "Paylasimli hafiza acilamadi!", "M2T2", MB_ICONERROR);

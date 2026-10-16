@@ -63,6 +63,7 @@ public:
     float m_farmRange   = 2000.f; // forum onerisi: 2000 menzil
     int  m_attackType   = 0;      // SendAttackPacket bType (0 = normal vurus)
     int  m_maxTargets   = 7;      // forum: ayni anda max 7 mob (rate-limit)
-    int  m_attackDelayMs= 200;    // forum: 180-220ms saldiri araligi
+    int  m_attackDelayMs= 150;    // 150ms: snappier; sunucu saldiri-araligini
+                                  // denetledigi icin daha dusuge inme (kick riski)
     char m_targetName[64] = {0};  // bos=her mob; doluysa sadece bu ismi iceren mob
 };
