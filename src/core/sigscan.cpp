@@ -36,17 +36,21 @@ static bool RegionExecutable(const MEMORY_BASIC_INFORMATION& mbi) {
            p == PAGE_EXECUTE_READWRITE || p == PAGE_EXECUTE_WRITECOPY;
 }
 
-// Bir bellek bloğunda birebir arama (SEH korumali — sayfa yaris durumunda patlamaz)
+// Bir bellek bloğunda birebir arama (SEH korumali — sayfa yaris durumunda patlamaz).
+// Ilk bayti memchr ile tarar (SIMD hizli) -> baslangic taramasi cok daha cabuk.
 static uintptr_t ScanBlock(const uint8_t* start, size_t size,
                            const uint8_t* pat, size_t len) {
     if (size < len) return 0;
     __try {
-        size_t last = size - len;
-        for (size_t i = 0; i <= last; ++i) {
-            if (start[i] != pat[0]) continue;
+        const uint8_t* p   = start;
+        const uint8_t* end = start + (size - len) + 1;  // son olasi baslangic+1
+        while (p < end) {
+            const uint8_t* q = (const uint8_t*)memchr(p, pat[0], (size_t)(end - p));
+            if (!q) break;
             size_t j = 1;
-            for (; j < len; ++j) if (start[i + j] != pat[j]) break;
-            if (j == len) return (uintptr_t)(start + i);
+            for (; j < len; ++j) if (q[j] != pat[j]) break;
+            if (j == len) return (uintptr_t)q;
+            p = q + 1;
         }
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return 0;

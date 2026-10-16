@@ -26,11 +26,15 @@ private:
     std::atomic<bool> m_running{ false };
     bool  m_setup_done   = false;
     bool  m_attack_ready = false;         // ResolveAttack basarili oldu mu
-    DWORD m_lastTick     = 0;
-    DWORD m_lastStatus   = 0;
-    DWORD m_lastHpPot    = 0;
-    DWORD m_lastSpPot    = 0;
-    DWORD m_farmPass     = 0;             // tarama sayaci (debug)
+    bool  m_fastFilter   = false;         // tek-cagrili Python filtre aktif mi (hiz)
+    DWORD m_lastTick       = 0;
+    DWORD m_lastStatus     = 0;
+    DWORD m_lastStatusRead = 0;          // HP/SP batch okuma zamani
+    DWORD m_lastHpPot      = 0;
+    DWORD m_lastSpPot      = 0;
+    DWORD m_farmPass       = 0;          // tarama sayaci (debug)
+    int   m_curHp          = 0;          // son okunan HP (farm HP-kritik kontrolu)
+    int   m_curMaxHp       = 0;
 
 public:
     // Ayarlar (ileride konsol komutuyla degistirilebilir)

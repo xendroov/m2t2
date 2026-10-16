@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 struct _object;
@@ -31,6 +32,16 @@ int         EvalInt(const char* expr);
 bool        EvalBool(const char* expr);
 float       EvalFloat(const char* expr);
 std::string EvalStr(const char* expr);
+
+// Bir tuple dönen expression'ı tek seferde int dizisine okur (compile 1 kez).
+// Ornek: "(player.GetStatus(5),player.GetStatus(6),player.GetStatus(1))".
+// out[0..n) doldurulur; okunan eleman sayisini doner.
+int EvalIntArray(const char* expr, int* out, int n);
+
+// [(int,float), ...] dönen expression'ı (id,mesafe) listesine okur (compile 1 kez).
+// Alan-saldirisinin sicak dongusu: tum filtreleme TEK Python cagrisinda yapilir.
+size_t EvalPairList(const char* expr,
+                    std::vector<std::pair<uint32_t,float>>& out, size_t cap);
 
 // Python deyimi çalıştır: "net.SendOnClickPacket(12345)"
 void Exec(const char* code);

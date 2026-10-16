@@ -156,6 +156,49 @@ std::string EvalStr(const char* expr) {
     return val;
 }
 
+// Tek compile ile bir int-tuple okur. expr bir tuple dondurmeli.
+int EvalIntArray(const char* expr, int* out, int n) {
+    for (int i = 0; i < n; ++i) out[i] = 0;
+    AcquireGIL();
+    void* r = EvalExpr(expr);
+    int got = 0;
+    if (r && g_TupGet && g_IntAsLong) {
+        for (int i = 0; i < n; ++i) {
+            void* it = g_TupGet(r, i);     // borrowed; aralik disi -> NULL + hata
+            if (it) { out[i] = (int)g_IntAsLong(it); ++got; }
+            else if (g_ErrClear) g_ErrClear();
+        }
+    }
+    if (r) g_DecRef(r);
+    ReleaseGIL();
+    return got;
+}
+
+// Tek compile ile [(int,float), ...] listesini okur. Alan-saldiri sicak dongusu.
+size_t EvalPairList(const char* expr,
+                    std::vector<std::pair<uint32_t,float>>& out, size_t cap) {
+    out.clear();
+    AcquireGIL();
+    void* r = EvalExpr(expr);
+    if (r && g_ListSize && g_ListGetItem && g_TupGet && g_IntAsLong && g_FltAsDbl) {
+        int n = g_ListSize(r);
+        if (n < 0) { if (g_ErrClear) g_ErrClear(); n = 0; }
+        for (int i = 0; i < n && out.size() < cap; ++i) {
+            void* item = g_ListGetItem(r, i);   // borrowed
+            if (!item) { if (g_ErrClear) g_ErrClear(); continue; }
+            void* pid = g_TupGet(item, 0);
+            void* pd  = g_TupGet(item, 1);
+            if (!pid || !pd) { if (g_ErrClear) g_ErrClear(); continue; }
+            uint32_t id = (uint32_t)g_IntAsLong(pid);
+            float    d  = (float)g_FltAsDbl(pd);
+            if (id) out.push_back({ id, d });
+        }
+    }
+    if (r) g_DecRef(r);
+    ReleaseGIL();
+    return out.size();
+}
+
 void Exec(const char* code) {
     AcquireGIL();
     void* g = MainGlobals();

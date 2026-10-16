@@ -65,6 +65,37 @@ void Bot::DoSetup() {
     ResolveAttack();
     if (!m_attack_ready)
         Console::Log("[Bot] UYARI: SendAttackPacket cozulemedi — END ile dump al, bana gonder");
+
+    // HIZ: tum mob filtrelemesini TEK Python cagrisinda yapan yardimci fonksiyonu
+    // __main__'e bir kez tanimla. Boylece her taramada 700 string-compile yerine
+    // 1 compile olur -> yururken takilma biter, tepki aninda olur.
+    PyAPI::Exec(
+        "def __m2t2_targets(vids, rng):\n"
+        "    out = []\n"
+        "    gcd = player.GetCharacterDistance\n"
+        "    gvn = nonplayer.GetVnumByVID\n"
+        "    isd = chrmgr.IsDead\n"
+        "    isn = chr.IsNPC\n"
+        "    iss = chr.IsShop\n"
+        "    for v in vids:\n"
+        "        try:\n"
+        "            d = gcd(v)\n"
+        "        except:\n"
+        "            continue\n"
+        "        if d <= 0.0 or d > rng:\n"
+        "            continue\n"
+        "        if gvn(v) <= 0:\n"
+        "            continue\n"
+        "        if isd(v):\n"
+        "            continue\n"
+        "        if isn(v) or iss(v):\n"
+        "            continue\n"
+        "        out.append((v, d))\n"
+        "    out.sort(key=lambda p: p[1])\n"
+        "    return out\n");
+    m_fastFilter = (PyAPI::EvalInt("1 if callable(__m2t2_targets) else 0") == 1);
+    Console::Log("[Bot] Hizli filtre: %s", m_fastFilter ? "AKTIF" : "KAPALI (yavas yol)");
+    FileLog::Write("[Bot] fastFilter=%d", (int)m_fastFilter);
 }
 
 // SEH korumali bellek okuma — gecersiz adreste crash yerine false doner.
@@ -533,67 +564,79 @@ void Bot::AttackArea() {
     }
 
     std::vector<uint32_t> vids = EnumerateVIDs();
-
-    // 1) Adaylari topla; her eleme sebebini say (DEBUG: ne engelledi?)
-    struct Cand { uint32_t vid; float d; };
-    std::vector<Cand> cands;
     int nEnum = (int)vids.size();
-    int nSelf = 0, nFar = 0, nInvalid = 0, nDead = 0, nNpc = 0, nShop = 0, nName = 0;
+
+    // Aday listesi (vid, mesafe) — mesafeye gore sirali.
+    std::vector<std::pair<uint32_t,float>> cands;
     char buf[96];
-    for (uint32_t vid : vids) {
-        if (vid == 0 || vid == myVid) { ++nSelf; continue; }
-        snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
-        float d = PyAPI::EvalFloat(buf);
-        // d<=0: gecersiz/cop VID (gercek mob hic mesafe 0 vermez; en yakin
-        // gercek mob bile ~100+ birim). Bu, "afallama" cop girdilerini eler.
-        if (d <= 0.f || d > m_farmRange) { ++nFar; continue; }
-        snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
-        if (PyAPI::EvalInt(buf) <= 0) { ++nInvalid; continue; }   // oyuncu/gecersiz
-        snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
-        if (PyAPI::EvalBool(buf)) { ++nDead; continue; }          // olu
-        snprintf(buf, sizeof(buf), "chr.IsNPC(%u)", vid);
-        if (PyAPI::EvalBool(buf)) { ++nNpc; continue; }           // NPC
-        snprintf(buf, sizeof(buf), "chr.IsShop(%u)", vid);
-        if (PyAPI::EvalBool(buf)) { ++nShop; continue; }          // dukkanci
-        if (m_targetName[0]) {
-            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", vid);
-            if (PyAPI::EvalStr(buf).find(m_targetName) == std::string::npos) { ++nName; continue; }
+
+    if (m_fastFilter && nEnum > 0) {
+        // --- HIZLI YOL: butun filtre TEK Python cagrisinda (1 compile). ---
+        // __m2t2_targets([v1,v2,...], range) -> sirali [(vid,mesafe),...]
+        std::string expr;
+        expr.reserve((size_t)nEnum * 8 + 48);
+        expr = "__m2t2_targets([";
+        char num[16];
+        for (int i = 0; i < nEnum; ++i) {
+            if (i) expr += ',';
+            snprintf(num, sizeof(num), "%u", vids[i]);
+            expr += num;
         }
-        cands.push_back({ vid, d });
+        snprintf(num, sizeof(num), "],%.1f)", m_farmRange);
+        expr += num;
+        PyAPI::EvalPairList(expr.c_str(), cands, 64);
+    } else if (nEnum > 0) {
+        // --- YAVAS YOL (yedek): mob basina ayri eval (fastFilter kurulamazsa). ---
+        for (uint32_t vid : vids) {
+            if (vid == 0 || vid == myVid) continue;
+            snprintf(buf, sizeof(buf), "player.GetCharacterDistance(%u)", vid);
+            float d = PyAPI::EvalFloat(buf);
+            if (d <= 0.f || d > m_farmRange) continue;
+            snprintf(buf, sizeof(buf), "nonplayer.GetVnumByVID(%u)", vid);
+            if (PyAPI::EvalInt(buf) <= 0) continue;
+            snprintf(buf, sizeof(buf), "chrmgr.IsDead(%u)", vid);
+            if (PyAPI::EvalBool(buf)) continue;
+            snprintf(buf, sizeof(buf), "chr.IsNPC(%u)", vid);
+            if (PyAPI::EvalBool(buf)) continue;
+            snprintf(buf, sizeof(buf), "chr.IsShop(%u)", vid);
+            if (PyAPI::EvalBool(buf)) continue;
+            cands.push_back({ vid, d });
+        }
+        std::sort(cands.begin(), cands.end(),
+                  [](const std::pair<uint32_t,float>& a,
+                     const std::pair<uint32_t,float>& b) { return a.second < b.second; });
     }
 
-    // 2) En yakindan uzaga sirala, max N vur
-    std::sort(cands.begin(), cands.end(),
-              [](const Cand& a, const Cand& b) { return a.d < b.d; });
-
+    // En yakindan basla, max N vur. Isim filtresi (varsa) burada — sadece
+    // menzildeki birkac aday icin, ucuz.
     int attacked = 0, sent = 0, rej = 0, err = 0;
     for (auto& c : cands) {
         if (attacked >= m_maxTargets) break;
-        int r = GameAttack(c.vid, m_attackType);
+        if (m_targetName[0]) {
+            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", c.first);
+            if (PyAPI::EvalStr(buf).find(m_targetName) == std::string::npos) continue;
+        }
+        int r = GameAttack(c.first, m_attackType);
         ++attacked;
         if (r == 1) ++sent; else if (r == 0) ++rej; else ++err;
         if (full) {
-            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", c.vid);
+            snprintf(buf, sizeof(buf), "chr.GetNameByVID(%u)", c.first);
             std::string nm = PyAPI::EvalStr(buf);
             FileLog::Write("[FARM]   VID %-6u '%s' mesafe=%-5.0f -> SendAttack=%d %s",
-                           c.vid, nm.c_str(), c.d, r,
+                           c.first, nm.c_str(), c.second, r,
                            r == 1 ? "(GONDERILDI)" : r == 0 ? "(OYUN REDDETTI)" : "(HATA)");
         }
     }
 
     if (full) {
-        Console::Log("[FARM] menzilde=%d  gonderilen=%d  reddedilen=%d  hata=%d  (enum=%d)",
-                     (int)cands.size(), sent, rej, err, nEnum);
-        FileLog::Write("[FARM] pass#%u enum=%d menzilde=%d vuruldu=%d | gonderilen=%d reddedilen=%d hata=%d",
-                       m_farmPass, nEnum, (int)cands.size(), attacked, sent, rej, err);
-        FileLog::Write("[FARM]   elendi: ben/0=%d uzak=%d gecersiz=%d olu=%d NPC=%d dukkan=%d isim=%d",
-                       nSelf, nFar, nInvalid, nDead, nNpc, nShop, nName);
+        Console::Log("[FARM] menzilde=%d gonderilen=%d reddedilen=%d hata=%d (enum=%d, %s)",
+                     (int)cands.size(), sent, rej, err, nEnum, m_fastFilter ? "hizli" : "yavas");
+        FileLog::Write("[FARM] pass#%u enum=%d menzilde=%d vuruldu=%d | gonderilen=%d reddedilen=%d hata=%d (%s)",
+                       m_farmPass, nEnum, (int)cands.size(), attacked, sent, rej, err,
+                       m_fastFilter ? "hizli" : "yavas");
         if (!cands.empty() && sent == 0)
             FileLog::Write("[FARM]   >> DIKKAT: menzilde mob var ama HIC paket gitmedi. "
-                           "donus 0 => oyun precheck reddetti (state/hareket), -1 => fn/netstream yok.");
-        else if (cands.empty() && nFar > 0)
-            FileLog::Write("[FARM]   >> Menzilde mob yok; en yakinlar 'uzak' sayildi. "
-                           "m_farmRange=%.0f yeterli mi?", m_farmRange);
+                           "donus 0 => precheck reddetti (state/hareket), -1 => fn/netstream yok.");
     }
 }
 
@@ -612,55 +655,60 @@ void Bot::OnFrame() {
     }
 
     DWORD now = GetTickCount();
-    if (now - m_lastTick < 150) return;
+    // Mesaj selinde ana thread'i bogmamak icin kucuk bir kapi (~33Hz).
+    // Eskiden 150ms idi; saldiri artik bundan BAGIMSIZ tetikleniyor (aninda tepki).
+    if (now - m_lastTick < 30) return;
     m_lastTick = now;
 
-    int hp    = PyAPI::EvalInt("player.GetStatus(5)");   // HP
-    int maxhp = PyAPI::EvalInt("player.GetStatus(6)");   // MAX_HP
-    int sp    = PyAPI::EvalInt("player.GetStatus(7)");   // SP
-    int maxsp = PyAPI::EvalInt("player.GetStatus(8)");   // MAX_SP
+    // --- Durum + iksir: ~200ms'de bir, TEK batch eval (5 ayri compile yerine 1) ---
+    if (now - m_lastStatusRead >= 200) {
+        m_lastStatusRead = now;
+        int st[5] = { 0 };
+        PyAPI::EvalIntArray(
+            "(player.GetStatus(5),player.GetStatus(6),player.GetStatus(7),"
+            "player.GetStatus(8),player.GetStatus(1))", st, 5);
+        m_curHp = st[0]; m_curMaxHp = st[1];
+        int sp = st[2], maxsp = st[3], lvl = st[4];
 
-    // 2 saniyede bir canli durum yaz (botun calistigini gorursun)
-    if (now - m_lastStatus >= 2000) {
-        m_lastStatus = now;
-        int lvl  = PyAPI::EvalInt("player.GetStatus(1)");
-        Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d  hedef=%u",
-                     lvl, hp, maxhp, sp, maxsp, m_targetVid);
+        if (now - m_lastStatus >= 2000) {
+            m_lastStatus = now;
+            Console::Log("[Bot] Lv%d  HP %d/%d  SP %d/%d", lvl, m_curHp, m_curMaxHp, sp, maxsp);
+        }
+        if (m_autoPotion) {
+            if (m_curMaxHp > 0 && (m_curHp * 100 / m_curMaxHp) < m_hpPotPct && (now - m_lastHpPot) > 800) {
+                WndHook::SendKey(m_hpPotKey);
+                m_lastHpPot = now;
+                FileLog::Write("[Bot] HP %%%d - iksir (F%d)", m_curHp * 100 / m_curMaxHp, m_hpPotKey - 0x6F);
+            }
+            if (maxsp > 0 && (sp * 100 / maxsp) < m_spPotPct && (now - m_lastSpPot) > 800) {
+                WndHook::SendKey(m_spPotKey);
+                m_lastSpPot = now;
+            }
+        }
     }
 
-    // --- Otomatik iksir (tus gonderimi — quickslot'a iksir koymalisin) ---
-    if (m_autoPotion) {
-        if (maxhp > 0 && (hp * 100 / maxhp) < m_hpPotPct && (now - m_lastHpPot) > 800) {
-            WndHook::SendKey(m_hpPotKey);
-            m_lastHpPot = now;
-            FileLog::Write("[Bot] HP %%%d - iksir (F%d)", hp * 100 / maxhp, m_hpPotKey - 0x6F);
-        }
-        if (maxsp > 0 && (sp * 100 / maxsp) < m_spPotPct && (now - m_lastSpPot) > 800) {
-            WndHook::SendKey(m_spPotKey);
-            m_lastSpPot = now;
-        }
-    }
-
-    // HP kritikse saldirma (olmemek icin)
-    if (maxhp > 0 && (hp * 100 / maxhp) < 10) return;
-
-    char buf[96];
-
+    // --- Saldiri: durumdan BAGIMSIZ, kendi araliginda (forum: 180-220ms) ---
     if (m_autoFarm) {
-        // Alan saldirisi: menzildeki tum mob'lara hizlica saldir
-        // (forum: 180-220ms araligi — rate-limit asma)
         if (now - m_lastScan >= (DWORD)m_attackDelayMs) {
             m_lastScan = now;
-            AttackArea();
+            // HP kritikse (olmemek icin) vurma — son okunan HP'ye bak
+            if (!(m_curMaxHp > 0 && (m_curHp * 100 / m_curMaxHp) < 10))
+                AttackArea();
         }
     } else {
         // Manuel mod: oyuncunun secili hedefine vur
-        int vid = PyAPI::EvalInt("player.GetTargetVID()");
-        if (vid <= 0) return;
-        snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
-        if (PyAPI::EvalBool(buf)) return;
-        int r = GameAttack((uint32_t)vid, m_attackType);
-        if (m_verbose)
-            FileLog::Write("[FARM-manuel] hedef VID=%d SendAttack=%d", vid, r);
+        if (now - m_lastScan >= (DWORD)m_attackDelayMs) {
+            m_lastScan = now;
+            int vid = PyAPI::EvalInt("player.GetTargetVID()");
+            if (vid > 0) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "chrmgr.IsDead(%d)", vid);
+                if (!PyAPI::EvalBool(buf)) {
+                    int r = GameAttack((uint32_t)vid, m_attackType);
+                    if (m_verbose)
+                        FileLog::Write("[FARM-manuel] hedef VID=%d SendAttack=%d", vid, r);
+                }
+            }
+        }
     }
 }
